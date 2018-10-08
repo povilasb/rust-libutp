@@ -1,0 +1,9 @@
+[package]
+name = "libutp-poc"
+version = "0.1.0"
+authors = ["Nikita Baksalyar <nikita.baksalyar@gmail.com>"]
+build = "build.rs"
+
+[dependencies]
+libc = "0.2"
+nix = "0.11"
