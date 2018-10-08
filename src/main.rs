@@ -1,10 +1,13 @@
+#![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
+
+include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+
 extern crate libc;
 extern crate nix;
 
-mod libutp;
-
-pub use libutp::*;
-use nix::sys::socket::{InetAddr, SockAddr};
+use nix::sys::socket::{sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage, InetAddr, SockAddr};
 use std::net::UdpSocket;
 use std::{env, io, mem};
 
