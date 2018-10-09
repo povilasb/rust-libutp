@@ -124,17 +124,13 @@ unsafe extern "C" fn callback_on_read(_arg1: *mut utp_callback_arguments) -> uin
 }
 
 unsafe extern "C" fn callback_sendto(_arg1: *mut utp_callback_arguments) -> uint64 {
-    let sock: &UdpSocket =
-        unsafe { &*(utp_context_get_userdata((*_arg1).context) as *const UdpSocket) };
-
-    let sockaddr_in = (*_arg1).args1.address;
-    let sockaddr = SockAddr::from_libc_sockaddr(sockaddr_in).unwrap();
-
     let args = UtpCallbackArgs::wrap(_arg1);
     println!("sendto: {:?}", args.address());
 
-    if let SockAddr::Inet(inet) = sockaddr {
-        sock.send_to(args.buf(), inet.to_std());
+    let sock: &UdpSocket =
+        unsafe { &*(utp_context_get_userdata((*_arg1).context) as *const UdpSocket) };
+    if let Some(addr) = args.address() {
+        sock.send_to(args.buf(), addr);
     }
 
     0
