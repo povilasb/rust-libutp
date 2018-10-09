@@ -107,6 +107,15 @@ impl UtpCallbackArgs {
             std::mem::transmute(state)
         }
     }
+
+    /// Returns immutable slice to the buffer used for a specific callback, say `on_read`.
+    pub fn buf(&self) -> &[u8] {
+        unsafe {
+            let buf = (*self.inner).buf;
+            let buf_len = (*self.inner).len;
+            std::slice::from_raw_parts(buf, buf_len)
+        }
+    }
 }
 
 unsafe extern "C" fn callback_on_read(_arg1: *mut utp_callback_arguments) -> uint64 {
@@ -117,16 +126,15 @@ unsafe extern "C" fn callback_on_read(_arg1: *mut utp_callback_arguments) -> uin
 unsafe extern "C" fn callback_sendto(_arg1: *mut utp_callback_arguments) -> uint64 {
     let sock: &UdpSocket =
         unsafe { &*(utp_context_get_userdata((*_arg1).context) as *const UdpSocket) };
-    let buf = slice::from_raw_parts((*_arg1).buf, (*_arg1).len);
 
     let sockaddr_in = (*_arg1).args1.address;
     let sockaddr = SockAddr::from_libc_sockaddr(sockaddr_in).unwrap();
 
-    let addr = UtpCallbackArgs::wrap(_arg1).address();
-    println!("sendto: {:?}", addr);
+    let args = UtpCallbackArgs::wrap(_arg1);
+    println!("sendto: {:?}", args.address());
 
     if let SockAddr::Inet(inet) = sockaddr {
-        sock.send_to(buf, inet.to_std());
+        sock.send_to(args.buf(), inet.to_std());
     }
 
     0
@@ -149,6 +157,7 @@ unsafe extern "C" fn callback_on_state_change(_arg1: *mut utp_callback_arguments
     0
 }
 
+/// During this call `buf` argument is 0 terminated string, `len` is undefined.
 unsafe extern "C" fn callback_log(_arg1: *mut utp_callback_arguments) -> uint64 {
     let log = CStr::from_ptr((*_arg1).buf as *const c_char).to_string_lossy();
     println!("{}", log);
