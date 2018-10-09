@@ -1,7 +1,7 @@
 [package]
-name = "libutp-poc"
+name = "utp"
 version = "0.1.0"
-authors = ["Nikita Baksalyar <nikita.baksalyar@gmail.com>"]
+authors = ["MaidSafe Developers <dev@maidsafe.net>"]
 build = "build.rs"
 
 [dependencies]
