@@ -11,7 +11,7 @@ use libc::c_char;
 use nix::sys::socket::{sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage, InetAddr, SockAddr};
 use std::ffi::CStr;
 use std::net::UdpSocket;
-use std::{env, io};
+use std::{env, io, slice};
 
 #[repr(u32)]
 enum UtpCallbackType {
@@ -67,9 +67,18 @@ unsafe extern "C" fn callback_sendto(_arg1: *mut utp_callback_arguments) -> uint
     let sockaddr_in = (*_arg1).__bindgen_anon_1.address;
     let sockaddr_in_len = (*_arg1).__bindgen_anon_2.address_len;
 
-    // sendto(fd, (*_arg1).buf, (*_arg1).len, 0, sockaddr_in, sockaddr_len);
+    let sock: &UdpSocket =
+        unsafe { &*(utp_context_get_userdata((*_arg1).context) as *const UdpSocket) };
+    let buf = slice::from_raw_parts((*_arg1).buf, (*_arg1).len);
 
-    println!("sendto {:?} {}", sockaddr_in, sockaddr_in_len);
+    let sockaddr = SockAddr::from_libc_sockaddr(sockaddr_in).unwrap();
+
+    println!("sendto {:?} {}", sockaddr, sockaddr_in_len);
+
+    if let SockAddr::Inet(inet) = sockaddr {
+        sock.send_to(buf, inet.to_std());
+    }
+
     0
 }
 
@@ -90,8 +99,11 @@ unsafe extern "C" fn callback_log(_arg1: *mut utp_callback_arguments) -> uint64 
 }
 
 fn client(utp: UtpContext) -> io::Result<()> {
-    let sock = unsafe { utp_create_socket(utp.ctx) };
+    let socket = UdpSocket::bind("127.0.0.1:0")?;
 
+    unsafe { utp_context_set_userdata(utp.ctx, &socket as *const _ as *mut _) };
+
+    let sock = unsafe { utp_create_socket(utp.ctx) };
     let dst_sockaddr = SockAddr::new_inet(InetAddr::from_std(&"127.0.0.1:34254".parse().unwrap()));
     let (sockaddr, socklen) = unsafe { dst_sockaddr.as_ffi_pair() };
 
@@ -127,6 +139,7 @@ fn main() -> io::Result<()> {
 
     utp.set_callback(UtpCallbackType::Log, Some(callback_log));
     utp.set_callback(UtpCallbackType::OnError, Some(callback_on_error));
+    utp.set_callback(UtpCallbackType::OnRead, Some(callback_on_read));
     utp.set_callback(UtpCallbackType::Sendto, Some(callback_sendto));
     utp.set_callback(
         UtpCallbackType::OnStateChange,
