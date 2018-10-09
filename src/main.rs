@@ -87,6 +87,11 @@ unsafe extern "C" fn callback_on_error(_arg1: *mut utp_callback_arguments) -> ui
     0
 }
 
+unsafe extern "C" fn callback_on_accept(_arg1: *mut utp_callback_arguments) -> uint64 {
+    println!("on_accept");
+    0
+}
+
 unsafe extern "C" fn callback_on_state_change(_arg1: *mut utp_callback_arguments) -> uint64 {
     println!("state {}", (*_arg1).__bindgen_anon_1.state);
     0
@@ -100,7 +105,6 @@ unsafe extern "C" fn callback_log(_arg1: *mut utp_callback_arguments) -> uint64 
 
 fn client(utp: UtpContext) -> io::Result<()> {
     let socket = UdpSocket::bind("127.0.0.1:0")?;
-
     unsafe { utp_context_set_userdata(utp.ctx, &socket as *const _ as *mut _) };
 
     let sock = unsafe { utp_create_socket(utp.ctx) };
@@ -117,17 +121,22 @@ fn client(utp: UtpContext) -> io::Result<()> {
     Ok(())
 }
 
-fn server(utp: UtpContext) -> io::Result<()> {
+fn server(mut utp: UtpContext) -> io::Result<()> {
     let socket = UdpSocket::bind("127.0.0.1:34254")?;
 
-    let mut buf = [0; 100];
-    let (amt, src) = socket.recv_from(&mut buf)?;
+    unsafe { utp_context_set_userdata(utp.ctx, &socket as *const _ as *mut _) };
+    utp.set_callback(UtpCallbackType::OnAccept, Some(callback_on_accept));
 
-    let src_sockaddr = SockAddr::new_inet(InetAddr::from_std(&src));
-    let (sockaddr, socklen) = unsafe { src_sockaddr.as_ffi_pair() };
+    loop {
+        let mut buf = [0; 100];
+        let (amt, src) = socket.recv_from(&mut buf)?;
 
-    let res = unsafe { utp_process_udp(utp.ctx, buf.as_ptr(), amt, sockaddr, socklen) };
-    println!("{}", res);
+        let src_sockaddr = SockAddr::new_inet(InetAddr::from_std(&src));
+        let (sockaddr, socklen) = unsafe { src_sockaddr.as_ffi_pair() };
+
+        let res = unsafe { utp_process_udp(utp.ctx, buf.as_ptr(), amt, sockaddr, socklen) };
+        println!("{}", res);
+    }
 
     Ok(())
 }
