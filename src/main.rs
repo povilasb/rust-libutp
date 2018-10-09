@@ -48,9 +48,7 @@ impl UtpContext {
     }
 
     fn set_callback(&mut self, cb_type: UtpCallbackType, cb: utp_callback_t) {
-        unsafe {
-            utp_set_callback(self.ctx, cb_type as i32, cb)
-        }
+        unsafe { utp_set_callback(self.ctx, cb_type as i32, cb) }
     }
 }
 
@@ -65,13 +63,23 @@ unsafe extern "C" fn callback_on_read(_arg1: *mut utp_callback_arguments) -> uin
     0
 }
 
+unsafe extern "C" fn callback_sendto(_arg1: *mut utp_callback_arguments) -> uint64 {
+    let sockaddr_in = (*_arg1).__bindgen_anon_1.address;
+    let sockaddr_in_len = (*_arg1).__bindgen_anon_2.address_len;
+
+    // sendto(fd, (*_arg1).buf, (*_arg1).len, 0, sockaddr_in, sockaddr_len);
+
+    println!("sendto {:?} {}", sockaddr_in, sockaddr_in_len);
+    0
+}
+
 unsafe extern "C" fn callback_on_error(_arg1: *mut utp_callback_arguments) -> uint64 {
     println!("error");
     0
 }
 
-unsafe extern "C" fn callback_on_connect(_arg1: *mut utp_callback_arguments) -> uint64 {
-    println!("connected");
+unsafe extern "C" fn callback_on_state_change(_arg1: *mut utp_callback_arguments) -> uint64 {
+    println!("state {}", (*_arg1).__bindgen_anon_1.state);
     0
 }
 
@@ -100,8 +108,6 @@ fn client(utp: UtpContext) -> io::Result<()> {
 fn server(utp: UtpContext) -> io::Result<()> {
     let socket = UdpSocket::bind("127.0.0.1:34254")?;
 
-    unsafe { utp_set_callback(utp.ctx, UTP_ON_READ as i32, Some(callback_on_read)) };
-
     let mut buf = [0; 100];
     let (amt, src) = socket.recv_from(&mut buf)?;
 
@@ -121,7 +127,11 @@ fn main() -> io::Result<()> {
 
     utp.set_callback(UtpCallbackType::Log, Some(callback_log));
     utp.set_callback(UtpCallbackType::OnError, Some(callback_on_error));
-    utp.set_callback(UtpCallbackType::OnConnect, Some(callback_on_connect));
+    utp.set_callback(UtpCallbackType::Sendto, Some(callback_sendto));
+    utp.set_callback(
+        UtpCallbackType::OnStateChange,
+        Some(callback_on_state_change),
+    );
 
     if env::args().collect::<Vec<_>>().len() > 1 {
         server(utp)?;
