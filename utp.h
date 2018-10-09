@@ -96,6 +96,19 @@ enum {
 
 extern const char *utp_callback_names[];
 
+union utp_callback_args1 {
+    const struct sockaddr *address;
+    int send;
+    int sample_ms;
+    int error_code;
+    int state;
+};
+
+union utp_callback_args2 {
+    socklen_t address_len;
+    int type;
+};
+
 typedef struct {
 	utp_context *context;
 	utp_socket *socket;
@@ -104,18 +117,8 @@ typedef struct {
 	int callback_type;
 	const byte *buf;
 
-	union {
-		const struct sockaddr *address;
-		int send;
-		int sample_ms;
-		int error_code;
-		int state;
-	};
-
-	union {
-		socklen_t address_len;
-		int type;
-	};
+    union utp_callback_args1 args1;
+    union utp_callback_args2 args2;
 } utp_callback_arguments;
 
 typedef uint64 utp_callback_t(utp_callback_arguments *);

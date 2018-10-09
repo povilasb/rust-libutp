@@ -10,7 +10,7 @@ extern crate nix;
 use libc::c_char;
 use nix::sys::socket::{sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage, InetAddr, SockAddr};
 use std::ffi::CStr;
-use std::net::UdpSocket;
+use std::net::{UdpSocket, SocketAddr};
 use std::{env, io, slice};
 
 #[repr(u32)]
@@ -58,22 +58,46 @@ impl Drop for UtpContext {
     }
 }
 
+/// Gives a more Rust'ish interface to callback arguments. Each libutp callback receives this
+/// structure.
+struct UtpCallbackArgs {
+    inner: *mut utp_callback_arguments,
+}
+
+impl UtpCallbackArgs {
+    /// Wraps libutp callback arguments to a more Rust'ish interface.
+    pub fn wrap(inner: *mut utp_callback_arguments) -> Self {
+        Self { inner }
+    }
+
+    /// Returns socket address, if it's IPv4 or IPv4. Otherwise `None` is returned.
+    pub fn address(&self) -> Option<SocketAddr> {
+        let addr_opt = unsafe {
+            let addr = (*self.inner).args1.address;
+            SockAddr::from_libc_sockaddr(addr)
+        };
+        match addr_opt {
+            Some(SockAddr::Inet(addr)) => Some(addr.to_std()),
+            _ => None,
+        }
+    }
+}
+
 unsafe extern "C" fn callback_on_read(_arg1: *mut utp_callback_arguments) -> uint64 {
     println!("read something");
     0
 }
 
 unsafe extern "C" fn callback_sendto(_arg1: *mut utp_callback_arguments) -> uint64 {
-    let sockaddr_in = (*_arg1).__bindgen_anon_1.address;
-    let sockaddr_in_len = (*_arg1).__bindgen_anon_2.address_len;
-
     let sock: &UdpSocket =
         unsafe { &*(utp_context_get_userdata((*_arg1).context) as *const UdpSocket) };
     let buf = slice::from_raw_parts((*_arg1).buf, (*_arg1).len);
 
+    let sockaddr_in = (*_arg1).args1.address;
     let sockaddr = SockAddr::from_libc_sockaddr(sockaddr_in).unwrap();
 
-    println!("sendto {:?} {}", sockaddr, sockaddr_in_len);
+    let addr = UtpCallbackArgs::wrap(_arg1).address();
+    println!("sendto: {:?}", addr);
 
     if let SockAddr::Inet(inet) = sockaddr {
         sock.send_to(buf, inet.to_std());
@@ -93,7 +117,7 @@ unsafe extern "C" fn callback_on_accept(_arg1: *mut utp_callback_arguments) -> u
 }
 
 unsafe extern "C" fn callback_on_state_change(_arg1: *mut utp_callback_arguments) -> uint64 {
-    println!("state {}", (*_arg1).__bindgen_anon_1.state);
+    println!("state {}", (*_arg1).args1.state);
     0
 }
 
