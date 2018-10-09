@@ -10,7 +10,7 @@ extern crate nix;
 use libc::c_char;
 use nix::sys::socket::{sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage, InetAddr, SockAddr};
 use std::ffi::CStr;
-use std::net::{UdpSocket, SocketAddr};
+use std::net::{SocketAddr, UdpSocket};
 use std::{env, io, slice};
 
 #[repr(u32)]
@@ -31,6 +31,24 @@ enum UtpCallbackType {
     GetRandom = UTP_GET_RANDOM,
     Log = UTP_LOG,
     Sendto = UTP_SENDTO,
+}
+
+#[derive(Debug)]
+#[repr(u32)]
+enum UtpState {
+    /// socket has reveived syn-ack (notification only for outgoing connection completion)
+    /// this implies writability
+    Connected = UTP_STATE_CONNECT,
+
+    /// socket is able to send more data
+    Writable = UTP_STATE_WRITABLE,
+
+    /// connection closed
+    ConnectionClosed = UTP_STATE_EOF,
+
+    /// socket is being destroyed, meaning all data has been sent if possible.
+    /// it is not valid to refer to the socket after this state change occurs
+    Destroying = UTP_STATE_DESTROYING,
 }
 
 struct UtpContext {
@@ -81,6 +99,14 @@ impl UtpCallbackArgs {
             _ => None,
         }
     }
+
+    /// Returns connection state.
+    pub fn state(&self) -> UtpState {
+        unsafe {
+            let state = (*self.inner).args1.state;
+            std::mem::transmute(state)
+        }
+    }
 }
 
 unsafe extern "C" fn callback_on_read(_arg1: *mut utp_callback_arguments) -> uint64 {
@@ -112,12 +138,14 @@ unsafe extern "C" fn callback_on_error(_arg1: *mut utp_callback_arguments) -> ui
 }
 
 unsafe extern "C" fn callback_on_accept(_arg1: *mut utp_callback_arguments) -> uint64 {
-    println!("on_accept");
+    let args = UtpCallbackArgs::wrap(_arg1);
+    println!("on_accept: {:?}", args.address());
     0
 }
 
 unsafe extern "C" fn callback_on_state_change(_arg1: *mut utp_callback_arguments) -> uint64 {
-    println!("state {}", (*_arg1).args1.state);
+    let args = UtpCallbackArgs::wrap(_arg1);
+    println!("state: {:?}", args.state());
     0
 }
 
