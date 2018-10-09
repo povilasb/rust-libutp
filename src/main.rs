@@ -13,6 +13,26 @@ use std::ffi::CStr;
 use std::net::UdpSocket;
 use std::{env, io};
 
+#[repr(u32)]
+enum UtpCallbackType {
+    OnFirewall = UTP_ON_FIREWALL,
+    OnAccept = UTP_ON_ACCEPT,
+    OnConnect = UTP_ON_CONNECT,
+    OnError = UTP_ON_ERROR,
+    OnRead = UTP_ON_READ,
+    OnOverhead = UTP_ON_OVERHEAD_STATISTICS,
+    OnStateChange = UTP_ON_STATE_CHANGE,
+    GetReadBufferSize = UTP_GET_READ_BUFFER_SIZE,
+    OnDelaySample = UTP_ON_DELAY_SAMPLE,
+    GetUdpMtu = UTP_GET_UDP_MTU,
+    GetUdpOverhead = UTP_GET_UDP_OVERHEAD,
+    GetMiliseconds = UTP_GET_MILLISECONDS,
+    GetMicroseconds = UTP_GET_MICROSECONDS,
+    GetRandom = UTP_GET_RANDOM,
+    Log = UTP_LOG,
+    Sendto = UTP_SENDTO,
+}
+
 struct UtpContext {
     ctx: *mut utp_context,
 }
@@ -25,6 +45,12 @@ impl UtpContext {
 
     fn context_set_option(&self, opt: u32, val: i32) {
         unsafe { utp_context_set_option(self.ctx, opt as i32, val) };
+    }
+
+    fn set_callback(&mut self, cb_type: UtpCallbackType, cb: utp_callback_t) {
+        unsafe {
+            utp_set_callback(self.ctx, cb_type as i32, cb)
+        }
     }
 }
 
@@ -89,13 +115,13 @@ fn server(utp: UtpContext) -> io::Result<()> {
 }
 
 fn main() -> io::Result<()> {
-    let utp = UtpContext::new();
+    let mut utp = UtpContext::new();
 
     utp.context_set_option(UTP_LOG_DEBUG, 1);
 
-    unsafe { utp_set_callback(utp.ctx, UTP_LOG as i32, Some(callback_log)) };
-    unsafe { utp_set_callback(utp.ctx, UTP_ON_ERROR as i32, Some(callback_on_error)) };
-    unsafe { utp_set_callback(utp.ctx, UTP_ON_CONNECT as i32, Some(callback_on_connect)) };
+    utp.set_callback(UtpCallbackType::Log, Some(callback_log));
+    utp.set_callback(UtpCallbackType::OnError, Some(callback_on_error));
+    utp.set_callback(UtpCallbackType::OnConnect, Some(callback_on_connect));
 
     if env::args().collect::<Vec<_>>().len() > 1 {
         server(utp)?;
