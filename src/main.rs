@@ -51,6 +51,18 @@ enum UtpState {
     Destroying = UTP_STATE_DESTROYING,
 }
 
+/// libutp is capable of holding arbitrary user data. We will use this structure to hold our
+/// context.
+pub struct UserData {
+    socket: Option<UdpSocket>,
+}
+
+impl UserData {
+    fn new() -> Self {
+        Self { socket: None }
+    }
+}
+
 struct UtpContext {
     ctx: *mut utp_context,
 }
