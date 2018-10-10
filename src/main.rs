@@ -63,47 +63,84 @@ impl UserData {
     }
 }
 
+// TODO(povilas): maybe templatize `UtpContext` by user data?
+/// To manipulate the user data held inside uTP context use `UtpContextRef` which is acquired with
+/// `UtpContext::get_ref()`.
 struct UtpContext {
     ctx: *mut utp_context,
+    /// Owns user data.
+    _user_data: UserData,
 }
 
 impl UtpContext {
     fn new() -> Self {
         let ctx = unsafe { utp_init(2) };
-        UtpContext { ctx }
-    }
-
-    fn wrap(ctx: *mut utp_context) -> Self {
-        Self { ctx }
+        let user_data = UserData::new();
+        set_user_data(ctx, &user_data);
+        UtpContext {
+            ctx,
+            _user_data: user_data,
+        }
     }
 
     fn context_set_option(&self, opt: u32, val: i32) {
         unsafe { utp_context_set_option(self.ctx, opt as i32, val) };
     }
 
-    /// Store arbitrary Rust objects inside `UtpContext`.
-    // TODO(povilas): how do we make sure the pointer lifetime is valid? `UtpContext` lifetime
-    // must mach `data` lifetime.
-    pub fn set_user_data<T>(&self, data: &T) {
-        unsafe { utp_context_set_userdata(self.ctx, data as *const _ as *mut _) };
-    }
-
-    /// Retrieve previously stored Rust object from `UtpContext`.
-    /// Returns `None`, if no object was stored.
-    /// Note that you must make sure the type `T` is correct.
-    pub fn get_user_data<T>(&self) -> Option<&T> {
-        unsafe {
-            let data = utp_context_get_userdata(self.ctx) as *const T;
-            if data.is_null() {
-                None
-            } else {
-                Some(&*data)
-            }
-        }
+    /// Get a reference to uTP context. Essentially this method is here just to avoid duplicate code
+    /// which is in `UtpContextRef`.
+    // TODO(povilas): use the same lifetime for `UtpContextRef` and `UtpContext.ctx`
+    pub fn get_ref(&self) -> UtpContextRef {
+        UtpContextRef::wrap(self.ctx)
     }
 
     fn set_callback(&mut self, cb_type: UtpCallbackType, cb: utp_callback_t) {
         unsafe { utp_set_callback(self.ctx, cb_type as i32, cb) }
+    }
+}
+
+/// Store arbitrary Rust objects inside `UtpContext`.
+fn set_user_data<T>(ctx: *mut utp_context, data: &T) {
+    unsafe { utp_context_set_userdata(ctx, data as *const _ as *mut _) };
+}
+
+/// Just like `UtpContext`, but doesn't destroy the underlying C structure, when `UtpContextRef`
+/// gets dropped. `UtpContextRef` is used to manipulate the user data held inside uTP context
+/// and the reason it exists is that we want to access uTP context from `UtpCallbackArgs`.
+struct UtpContextRef<'a> {
+    _ctx: *mut utp_context,
+    user_data: &'a mut UserData,
+}
+
+impl<'a> UtpContextRef<'a> {
+    fn wrap(ctx: *mut utp_context) -> Self {
+        let user_data = get_user_data_mut::<UserData>(ctx).expect("User data must be always set.");
+        Self {
+            _ctx: ctx,
+            user_data,
+        }
+    }
+
+    fn user_data(&self) -> &UserData {
+        self.user_data
+    }
+
+    pub fn user_data_mut(&mut self) -> &mut UserData {
+        &mut self.user_data
+    }
+}
+
+/// Retrieve previously stored Rust object from `UtpContext`.
+/// Returns `None`, if no object was stored.
+/// Note that you must make sure the type `T` is correct.
+fn get_user_data_mut<'a, T>(ctx: *mut utp_context) -> Option<&'a mut T> {
+    unsafe {
+        let data = utp_context_get_userdata(ctx) as *mut T;
+        if data.is_null() {
+            None
+        } else {
+            Some(&mut *data)
+        }
     }
 }
 
@@ -155,8 +192,8 @@ impl UtpCallbackArgs {
     }
 
     /// Returns Rustish uTP context object.
-    pub fn context(&self) -> UtpContext {
-        unsafe { UtpContext::wrap((*self.inner).context) }
+    pub fn context_ref(&self) -> UtpContextRef {
+        unsafe { UtpContextRef::wrap((*self.inner).context) }
     }
 }
 
@@ -170,8 +207,8 @@ unsafe extern "C" fn callback_sendto(_arg1: *mut utp_callback_arguments) -> uint
     println!("sendto: {:?}", args.address());
 
     if let Some(addr) = args.address() {
-        if let Some(sock) = args.context().get_user_data::<UdpSocket>() {
-            sock.send_to(args.buf(), addr);
+        if let Some(ref sock) = args.context_ref().user_data().socket {
+            sock.send_to(args.buf(), addr).unwrap();
         }
     }
 
@@ -204,7 +241,7 @@ unsafe extern "C" fn callback_log(_arg1: *mut utp_callback_arguments) -> uint64 
 
 fn client(utp: UtpContext) -> io::Result<()> {
     let socket = UdpSocket::bind("127.0.0.1:0")?;
-    utp.set_user_data(&socket);
+    utp.get_ref().user_data_mut().socket = Some(socket);
 
     let sock = unsafe { utp_create_socket(utp.ctx) };
     let dst_sockaddr = SockAddr::new_inet(InetAddr::from_std(&"127.0.0.1:34254".parse().unwrap()));
@@ -222,10 +259,12 @@ fn client(utp: UtpContext) -> io::Result<()> {
 
 fn server(mut utp: UtpContext) -> io::Result<()> {
     let socket = UdpSocket::bind("127.0.0.1:34254")?;
-    utp.set_user_data(&socket);
+    utp.get_ref().user_data_mut().socket = Some(socket);
 
     utp.set_callback(UtpCallbackType::OnAccept, Some(callback_on_accept));
 
+    let ctx_ref = utp.get_ref(); // keep reference alive
+    let socket = ctx_ref.user_data().socket.as_ref().unwrap();
     loop {
         let mut buf = [0; 100];
         let (amt, src) = socket.recv_from(&mut buf)?;
