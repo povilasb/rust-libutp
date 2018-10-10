@@ -11,7 +11,7 @@ use libc::c_char;
 use nix::sys::socket::{sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage, InetAddr, SockAddr};
 use std::ffi::CStr;
 use std::net::{SocketAddr, UdpSocket};
-use std::{env, io, slice};
+use std::{env, io};
 
 #[repr(u32)]
 enum UtpCallbackType {
@@ -61,8 +61,33 @@ impl UtpContext {
         UtpContext { ctx }
     }
 
+    fn wrap(ctx: *mut utp_context) -> Self {
+        Self { ctx }
+    }
+
     fn context_set_option(&self, opt: u32, val: i32) {
         unsafe { utp_context_set_option(self.ctx, opt as i32, val) };
+    }
+
+    /// Store arbitrary Rust objects inside `UtpContext`.
+    // TODO(povilas): how do we make sure the pointer lifetime is valid? `UtpContext` lifetime
+    // must mach `data` lifetime.
+    pub fn set_user_data<T>(&self, data: &T) {
+        unsafe { utp_context_set_userdata(self.ctx, data as *const _ as *mut _) };
+    }
+
+    /// Retrieve previously stored Rust object from `UtpContext`.
+    /// Returns `None`, if no object was stored.
+    /// Note that you must make sure the type `T` is correct.
+    pub fn get_user_data<T>(&self) -> Option<&T> {
+        unsafe {
+            let data = utp_context_get_userdata(self.ctx) as *const T;
+            if data.is_null() {
+                None
+            } else {
+                Some(&*data)
+            }
+        }
     }
 
     fn set_callback(&mut self, cb_type: UtpCallbackType, cb: utp_callback_t) {
@@ -116,6 +141,11 @@ impl UtpCallbackArgs {
             std::slice::from_raw_parts(buf, buf_len)
         }
     }
+
+    /// Returns Rustish uTP context object.
+    pub fn context(&self) -> UtpContext {
+        unsafe { UtpContext::wrap((*self.inner).context) }
+    }
 }
 
 unsafe extern "C" fn callback_on_read(_arg1: *mut utp_callback_arguments) -> uint64 {
@@ -127,10 +157,10 @@ unsafe extern "C" fn callback_sendto(_arg1: *mut utp_callback_arguments) -> uint
     let args = UtpCallbackArgs::wrap(_arg1);
     println!("sendto: {:?}", args.address());
 
-    let sock: &UdpSocket =
-        unsafe { &*(utp_context_get_userdata((*_arg1).context) as *const UdpSocket) };
     if let Some(addr) = args.address() {
-        sock.send_to(args.buf(), addr);
+        if let Some(sock) = args.context().get_user_data::<UdpSocket>() {
+            sock.send_to(args.buf(), addr);
+        }
     }
 
     0
@@ -162,7 +192,7 @@ unsafe extern "C" fn callback_log(_arg1: *mut utp_callback_arguments) -> uint64 
 
 fn client(utp: UtpContext) -> io::Result<()> {
     let socket = UdpSocket::bind("127.0.0.1:0")?;
-    unsafe { utp_context_set_userdata(utp.ctx, &socket as *const _ as *mut _) };
+    utp.set_user_data(&socket);
 
     let sock = unsafe { utp_create_socket(utp.ctx) };
     let dst_sockaddr = SockAddr::new_inet(InetAddr::from_std(&"127.0.0.1:34254".parse().unwrap()));
@@ -180,8 +210,8 @@ fn client(utp: UtpContext) -> io::Result<()> {
 
 fn server(mut utp: UtpContext) -> io::Result<()> {
     let socket = UdpSocket::bind("127.0.0.1:34254")?;
+    utp.set_user_data(&socket);
 
-    unsafe { utp_context_set_userdata(utp.ctx, &socket as *const _ as *mut _) };
     utp.set_callback(UtpCallbackType::OnAccept, Some(callback_on_accept));
 
     loop {
