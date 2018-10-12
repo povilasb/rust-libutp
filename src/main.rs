@@ -17,7 +17,7 @@ use std::{env, io};
 
 #[derive(Hash, Eq, PartialEq)]
 #[repr(u32)]
-enum UtpCallbackType {
+pub enum UtpCallbackType {
     OnFirewall = UTP_ON_FIREWALL,
     OnAccept = UTP_ON_ACCEPT,
     OnConnect = UTP_ON_CONNECT,
@@ -38,7 +38,7 @@ enum UtpCallbackType {
 
 #[derive(Debug)]
 #[repr(u32)]
-enum UtpState {
+pub enum UtpState {
     /// socket has reveived syn-ack (notification only for outgoing connection completion)
     /// this implies writability
     Connected = UTP_STATE_CONNECT,
@@ -91,7 +91,7 @@ impl<T> UtpUserData<T> {
 
 /// To manipulate the user data held inside uTP context use `UtpContextRef` which is acquired with
 /// `UtpContext::get_ref()`.
-struct UtpContext<T> {
+pub struct UtpContext<T> {
     ctx: *mut utp_context,
     _user_data_type: PhantomData<T>,
 }
@@ -108,13 +108,6 @@ impl<T> UtpContext<T> {
         unsafe { utp_context_set_userdata(ctx, Box::into_raw(utp_user_data) as *mut _) };
 
         init_callbacks::<T>(ctx);
-        Self {
-            ctx,
-            _user_data_type: PhantomData,
-        }
-    }
-
-    pub fn wrap(ctx: *mut utp_context) -> Self {
         Self {
             ctx,
             _user_data_type: PhantomData,
@@ -196,7 +189,7 @@ fn init_callbacks<T>(ctx: *mut utp_context) {
 
 /// Gives a more Rust'ish interface to callback arguments. Each libutp callback receives this
 /// structure.
-struct UtpCallbackArgs<T> {
+pub struct UtpCallbackArgs<T> {
     inner: *mut utp_callback_arguments,
     _user_data_type: PhantomData<T>,
 }
