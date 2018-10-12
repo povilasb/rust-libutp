@@ -6,13 +6,15 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 extern crate libc;
 extern crate nix;
+#[macro_use]
+extern crate net_literals;
 
 use libc::c_char;
 use nix::sys::socket::{sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage, InetAddr, SockAddr};
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::marker::PhantomData;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{Shutdown, SocketAddr, UdpSocket};
 use std::{env, io};
 
 #[derive(Hash, Eq, PartialEq)]
@@ -89,6 +91,47 @@ impl<T> UtpUserData<T> {
     }
 }
 
+/// Handle to virtual uTP socket that is not connected with a real socket.
+/// Note, `UtpSocket` has no read, you will receive `CallbackType::OnRead` when data arrives.
+pub struct UtpSocket {
+    inner: *mut utp_socket,
+}
+
+impl UtpSocket {
+    fn new(inner: *mut utp_socket) -> Self {
+        Self { inner }
+    }
+
+    /// Write some data to uTP socket and return the result.
+    // TODO(povilas): wrap isize to Result
+    pub fn send(&self, buf: &[u8]) -> isize {
+        unsafe { utp_write(self.inner, buf.as_ptr() as *mut _, buf.len()) }
+    }
+
+    /// Shutdown reads and/or writes on the socket.
+    pub fn shutdown(&self, how: Shutdown) {
+        let how = match how {
+            Shutdown::Read => SHUT_RD,
+            Shutdown::Write => SHUT_WR,
+            Shutdown::Both => SHUT_RDWR,
+        } as i32;
+        unsafe {
+            utp_shutdown(self.inner, how);
+        }
+    }
+
+    // TODO(povilas): implement user data cause each socket can have it's own user data just like
+    // uTP context
+}
+
+impl Drop for UtpSocket {
+    fn drop(&mut self) {
+        unsafe {
+            utp_close(self.inner);
+        }
+    }
+}
+
 /// To manipulate the user data held inside uTP context use `UtpContextRef` which is acquired with
 /// `UtpContext::get_ref()`.
 pub struct UtpContext<T> {
@@ -136,10 +179,24 @@ impl<T> UtpContext<T> {
     /// e.g. terminate connection or call `UtpCallbackType::OnRead` callback, etc.
     // TODO(povilas): return proper Rust result instead of i32
     pub fn process_udp(&self, packet: &[u8], sender_addr: SocketAddr) -> i32 {
-        let sender_sockaddr = SockAddr::new_inet(InetAddr::from_std(&sender_addr));
-        unsafe {
-            let (sockaddr, socklen) = sender_sockaddr.as_ffi_pair();
-            utp_process_udp(self.ctx, packet.as_ptr(), packet.len(), sockaddr, socklen)
+        let (sockaddr, socklen) = c_sock_addr(sender_addr);
+        unsafe { utp_process_udp(self.ctx, packet.as_ptr(), packet.len(), &sockaddr, socklen) }
+    }
+
+    // TODO(povilas): return proper Rust error instead of i32
+    pub fn connect(&mut self, addr: SocketAddr) -> Result<UtpSocket, i32> {
+        let (sockaddr, socklen) = c_sock_addr(addr);
+        let (sock, res) = unsafe {
+            let sock = utp_create_socket(self.ctx);
+            let res = utp_connect(sock, &sockaddr, socklen);
+            (sock, res)
+        };
+        if res == 0 {
+            Ok(UtpSocket::new(sock))
+        } else {
+            // TODO(povilas): destroy socket handle on error. NOTE: currently there's no way to do
+            // this in libutp.
+            Err(res)
         }
     }
 
@@ -150,6 +207,13 @@ impl<T> UtpContext<T> {
     fn utp_user_data_mut(&self) -> &mut UtpUserData<T> {
         get_user_data_mut::<UtpUserData<T>>(self.ctx).expect("uTP user data must be always set.")
     }
+}
+
+/// Converts Rust socket address into corresponding C data type.
+fn c_sock_addr(addr: SocketAddr) -> (sockaddr, u32) {
+    let sockaddr = SockAddr::new_inet(InetAddr::from_std(&addr));
+    let (sockaddr, socklen) = unsafe { sockaddr.as_ffi_pair() };
+    (*sockaddr, socklen)
 }
 
 /// Initialize all possible uTP callbacks.
@@ -292,21 +356,15 @@ impl<T> Drop for UtpContext<T> {
     }
 }
 
-fn client(utp: UtpContext<Option<UdpSocket>>) -> io::Result<()> {
+fn client(mut utp: UtpContext<Option<UdpSocket>>) -> io::Result<()> {
     let socket = UdpSocket::bind("127.0.0.1:0")?;
     *utp.user_data_mut() = Some(socket);
 
-    // TODO(povilas): wrap socket
-    let sock = unsafe { utp_create_socket(utp.ctx) };
-    let dst_sockaddr = SockAddr::new_inet(InetAddr::from_std(&"127.0.0.1:34254".parse().unwrap()));
-    let (sockaddr, socklen) = unsafe { dst_sockaddr.as_ffi_pair() };
-
-    let res = unsafe { utp_connect(sock, sockaddr, socklen) };
-    println!("conn_res {}", res);
-
-    let buf = vec![1, 2, 3];
-    let res = unsafe { utp_write(sock, buf.as_ptr() as *mut _, buf.len()) };
-    println!("res {}", res);
+    let sock = utp
+        .connect(addr!("127.0.0.1:34254"))
+        .expect("Failed to make uTP connection");
+    let res = sock.send(&vec![1, 2, 3]);
+    println!("client send: {}", res);
 
     Ok(())
 }
