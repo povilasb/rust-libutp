@@ -139,6 +139,17 @@ impl<T> UtpContext<T> {
         self.utp_user_data_mut().callbacks.insert(cb_type, cb);
     }
 
+    /// Feed UDP packet to underlying uTP library that will process it and react appropriately:
+    /// e.g. terminate connection or call `UtpCallbackType::OnRead` callback, etc.
+    // TODO(povilas): return proper Rust result instead of i32
+    pub fn process_udp(&self, packet: &[u8], sender_addr: SocketAddr) -> i32 {
+        let sender_sockaddr = SockAddr::new_inet(InetAddr::from_std(&sender_addr));
+        unsafe {
+            let (sockaddr, socklen) = sender_sockaddr.as_ffi_pair();
+            utp_process_udp(self.ctx, packet.as_ptr(), packet.len(), sockaddr, socklen)
+        }
+    }
+
     fn utp_user_data(&self) -> &UtpUserData<T> {
         get_user_data::<UtpUserData<T>>(self.ctx).expect("uTP user data must be always set.")
     }
@@ -322,14 +333,9 @@ fn server(mut utp: UtpContext<Option<UdpSocket>>) -> io::Result<()> {
     let socket = utp.user_data().as_ref().unwrap();
     loop {
         let mut buf = [0; 100];
-        let (amt, src) = socket.recv_from(&mut buf)?;
-
-        let src_sockaddr = SockAddr::new_inet(InetAddr::from_std(&src));
-        let (sockaddr, socklen) = unsafe { src_sockaddr.as_ffi_pair() };
-
-        // TODO(povilas): move this to UtpContext
-        let res = unsafe { utp_process_udp(utp.ctx, buf.as_ptr(), amt, sockaddr, socklen) };
-        println!("{}", res);
+        let (bytes_received, sender_addr) = socket.recv_from(&mut buf)?;
+        let res = utp.process_udp(&buf[..bytes_received], sender_addr);
+        println!("utp_process: {}", res);
     }
 
     Ok(())
