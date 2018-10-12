@@ -1,15 +1,16 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+#![allow(unsafe_code)]
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-use libc::{self, c_char};
+use libc;
 use nix::sys::socket::{sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage, InetAddr, SockAddr};
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::marker::PhantomData;
-use std::net::{Shutdown, SocketAddr, UdpSocket};
+use std::net::{Shutdown, SocketAddr};
 use std::{mem, slice};
 
 #[derive(Hash, Eq, PartialEq)]
@@ -156,7 +157,7 @@ impl<T> UtpContext<T> {
         &self.utp_user_data().data
     }
 
-    pub fn user_data_mut(&self) -> &mut T {
+    pub fn user_data_mut(&mut self) -> &mut T {
         let user_data = get_user_data_mut::<UtpUserData<T>>(self.ctx)
             .expect("uTP user data must be always set.");
         &mut user_data.data
@@ -302,11 +303,13 @@ impl<T> UtpCallbackArgs<T> {
         &self.utp_user_data().data
     }
 
+    // TODO(povilas): pub fn socket() -> UtpSocket
+
     /// In some cases (e.g. logging), `buf` argument holds a C style, 0 terminated, string.
     /// This function converts such string into Rust `String`.
     pub fn buf_as_string(&self) -> String {
         unsafe {
-            CStr::from_ptr((*self.inner).buf as *const c_char)
+            CStr::from_ptr((*self.inner).buf as *const libc::c_char)
                 .to_string_lossy()
                 .into_owned()
         }
