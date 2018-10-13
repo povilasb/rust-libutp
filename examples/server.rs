@@ -6,11 +6,8 @@ use std::io;
 use std::net::UdpSocket;
 use utp::{UtpCallbackArgs, UtpCallbackType, UtpContext};
 
-fn handle_connections(mut utp: UtpContext<Option<UdpSocket>>) -> io::Result<()> {
-    let socket = UdpSocket::bind("0.0.0.0:1234")?;
-    *utp.user_data_mut() = Some(socket);
-
-    let socket = utp.user_data().as_ref().unwrap();
+fn handle_connections(utp: UtpContext<UdpSocket>) -> io::Result<()> {
+    let socket = utp.user_data();
     loop {
         let mut buf = [0; 4096];
         let (bytes_received, sender_addr) = socket.recv_from(&mut buf)?;
@@ -20,8 +17,15 @@ fn handle_connections(mut utp: UtpContext<Option<UdpSocket>>) -> io::Result<()> 
 }
 
 fn main() -> io::Result<()> {
-    let mut utp: UtpContext<Option<UdpSocket>> = UtpContext::new(None);
-    // utp.set_debug_log(true);
+    let socket = UdpSocket::bind("0.0.0.0:1234")?;
+    let utp = make_utp_ctx(socket);
+    handle_connections(utp)?;
+    Ok(())
+}
+
+fn make_utp_ctx(socket: UdpSocket) -> UtpContext<UdpSocket> {
+    let mut utp = UtpContext::new(socket);
+    utp.set_debug_log(true);
     utp.set_callback(
         UtpCallbackType::Log,
         Box::new(|args| {
@@ -53,12 +57,10 @@ fn main() -> io::Result<()> {
     );
     utp.set_callback(
         UtpCallbackType::OnAccept,
-        Box::new(|args: UtpCallbackArgs<Option<UdpSocket>>| {
+        Box::new(|args: UtpCallbackArgs<UdpSocket>| {
             println!("on_accept: {:?}", args.address());
             0
         }),
     );
-
-    handle_connections(utp)?;
-    Ok(())
+    utp
 }

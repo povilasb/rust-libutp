@@ -6,28 +6,34 @@ extern crate net_literals;
 
 use std::io::{self, Write};
 use std::net::UdpSocket;
-use utp::{UtpCallbackArgs, UtpCallbackType, UtpContext};
+use std::thread;
+use utp::{UtpCallbackType, UtpContext};
 
-fn send_messages(mut utp: UtpContext<Option<UdpSocket>>) -> io::Result<()> {
-    let socket = UdpSocket::bind("127.0.0.1:0")?;
-    *utp.user_data_mut() = Some(socket);
+fn send_messages(mut utp: UtpContext<UdpSocket>) -> io::Result<()> {
+    let sock = utp
+        .connect(addr!("127.0.0.1:1234"))
+        .expect("Failed to make uTP connection");
 
     loop {
         print!("\r> ");
         io::stdout().flush().unwrap();
         let msg = readln()?;
 
-        let sock = utp
-            .connect(addr!("127.0.0.1:1234"))
-            .expect("Failed to make uTP connection");
         let res = sock.send(&msg.into_bytes()[..]);
         println!("[send result] {}", res);
     }
 }
 
 fn main() -> io::Result<()> {
-    let mut utp: UtpContext<Option<UdpSocket>> = UtpContext::new(None);
-    // utp.set_debug_log(true);
+    let socket = UdpSocket::bind("127.0.0.1:0")?;
+    let utp = make_utp_ctx(socket);
+    send_messages(utp)?;
+    Ok(())
+}
+
+fn make_utp_ctx(socket: UdpSocket) -> UtpContext<UdpSocket> {
+    let mut utp: UtpContext<UdpSocket> = UtpContext::new(socket);
+    utp.set_debug_log(true);
     utp.set_callback(
         UtpCallbackType::Log,
         Box::new(|args| {
@@ -48,9 +54,8 @@ fn main() -> io::Result<()> {
         Box::new(|args| {
             println!("sendto: {:?}", args.address());
             if let Some(addr) = args.address() {
-                if let Some(ref sock) = args.user_data() {
-                    sock.send_to(args.buf(), addr).unwrap();
-                }
+                let sock = args.user_data();
+                sock.send_to(args.buf(), addr).unwrap();
             }
             0
         }),
@@ -62,9 +67,7 @@ fn main() -> io::Result<()> {
             0
         }),
     );
-
-    send_messages(utp)?;
-    Ok(())
+    utp
 }
 
 fn readln() -> io::Result<String> {
