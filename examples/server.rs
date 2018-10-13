@@ -62,5 +62,16 @@ fn make_utp_ctx(socket: UdpSocket) -> UtpContext<UdpSocket> {
             0
         }),
     );
+    utp.set_callback(
+        UtpCallbackType::Sendto,
+        Box::new(|args| {
+            println!("sendto: {:?}", args.address());
+            if let Some(addr) = args.address() {
+                let sock = args.user_data();
+                sock.send_to(args.buf(), addr).unwrap();
+            }
+            0
+        }),
+    );
     utp
 }
