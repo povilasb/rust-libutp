@@ -201,6 +201,12 @@ impl<T> UtpContext<T> {
         }
     }
 
+    /// Sends all deferred ACK packets.
+    /// This method should be called when real UDP socket becomes unreadable - returns EWOULDBLOCK.
+    pub fn ack_packets(&self) {
+        unsafe { utp_issue_deferred_acks(self.ctx); }
+    }
+
     fn utp_user_data(&self) -> &UtpUserData<T> {
         get_user_data::<UtpUserData<T>>(self.ctx).expect("uTP user data must be always set.")
     }
@@ -303,7 +309,12 @@ impl<T> UtpCallbackArgs<T> {
         &self.utp_user_data().data
     }
 
-    // TODO(povilas): pub fn socket() -> UtpSocket
+    /// Acknowledges received data.
+    /// This function must be called from `OnRead` callback otherwise received data won't
+    /// be acknowledged.
+    pub fn ack_data(&mut self) {
+        unsafe { utp_read_drained((*self.inner).socket) }
+    }
 
     /// In some cases (e.g. logging), `buf` argument holds a C style, 0 terminated, string.
     /// This function converts such string into Rust `String`.
