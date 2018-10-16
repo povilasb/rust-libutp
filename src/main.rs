@@ -1,245 +1,93 @@
-#![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
-
-include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
-
 extern crate libc;
 extern crate nix;
+#[macro_use]
+extern crate net_literals;
 
-use libc::c_char;
-use nix::sys::socket::{sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage, InetAddr, SockAddr};
-use std::ffi::CStr;
-use std::net::{SocketAddr, UdpSocket};
+mod utp;
+
+use std::net::UdpSocket;
 use std::{env, io};
+use utp::{UtpCallbackArgs, UtpCallbackType, UtpContext};
 
-#[repr(u32)]
-enum UtpCallbackType {
-    OnFirewall = UTP_ON_FIREWALL,
-    OnAccept = UTP_ON_ACCEPT,
-    OnConnect = UTP_ON_CONNECT,
-    OnError = UTP_ON_ERROR,
-    OnRead = UTP_ON_READ,
-    OnOverhead = UTP_ON_OVERHEAD_STATISTICS,
-    OnStateChange = UTP_ON_STATE_CHANGE,
-    GetReadBufferSize = UTP_GET_READ_BUFFER_SIZE,
-    OnDelaySample = UTP_ON_DELAY_SAMPLE,
-    GetUdpMtu = UTP_GET_UDP_MTU,
-    GetUdpOverhead = UTP_GET_UDP_OVERHEAD,
-    GetMiliseconds = UTP_GET_MILLISECONDS,
-    GetMicroseconds = UTP_GET_MICROSECONDS,
-    GetRandom = UTP_GET_RANDOM,
-    Log = UTP_LOG,
-    Sendto = UTP_SENDTO,
-}
-
-#[derive(Debug)]
-#[repr(u32)]
-enum UtpState {
-    /// socket has reveived syn-ack (notification only for outgoing connection completion)
-    /// this implies writability
-    Connected = UTP_STATE_CONNECT,
-
-    /// socket is able to send more data
-    Writable = UTP_STATE_WRITABLE,
-
-    /// connection closed
-    ConnectionClosed = UTP_STATE_EOF,
-
-    /// socket is being destroyed, meaning all data has been sent if possible.
-    /// it is not valid to refer to the socket after this state change occurs
-    Destroying = UTP_STATE_DESTROYING,
-}
-
-struct UtpContext {
-    ctx: *mut utp_context,
-}
-
-impl UtpContext {
-    fn new() -> Self {
-        let ctx = unsafe { utp_init(2) };
-        UtpContext { ctx }
-    }
-
-    fn wrap(ctx: *mut utp_context) -> Self {
-        Self { ctx }
-    }
-
-    fn context_set_option(&self, opt: u32, val: i32) {
-        unsafe { utp_context_set_option(self.ctx, opt as i32, val) };
-    }
-
-    /// Store arbitrary Rust objects inside `UtpContext`.
-    // TODO(povilas): how do we make sure the pointer lifetime is valid? `UtpContext` lifetime
-    // must mach `data` lifetime.
-    pub fn set_user_data<T>(&self, data: &T) {
-        unsafe { utp_context_set_userdata(self.ctx, data as *const _ as *mut _) };
-    }
-
-    /// Retrieve previously stored Rust object from `UtpContext`.
-    /// Returns `None`, if no object was stored.
-    /// Note that you must make sure the type `T` is correct.
-    pub fn get_user_data<T>(&self) -> Option<&T> {
-        unsafe {
-            let data = utp_context_get_userdata(self.ctx) as *const T;
-            if data.is_null() {
-                None
-            } else {
-                Some(&*data)
-            }
-        }
-    }
-
-    fn set_callback(&mut self, cb_type: UtpCallbackType, cb: utp_callback_t) {
-        unsafe { utp_set_callback(self.ctx, cb_type as i32, cb) }
-    }
-}
-
-impl Drop for UtpContext {
-    fn drop(&mut self) {
-        unsafe { utp_destroy(self.ctx) }
-    }
-}
-
-/// Gives a more Rust'ish interface to callback arguments. Each libutp callback receives this
-/// structure.
-struct UtpCallbackArgs {
-    inner: *mut utp_callback_arguments,
-}
-
-impl UtpCallbackArgs {
-    /// Wraps libutp callback arguments to a more Rust'ish interface.
-    pub fn wrap(inner: *mut utp_callback_arguments) -> Self {
-        Self { inner }
-    }
-
-    /// Returns socket address, if it's IPv4 or IPv4. Otherwise `None` is returned.
-    pub fn address(&self) -> Option<SocketAddr> {
-        let addr_opt = unsafe {
-            let addr = (*self.inner).args1.address;
-            SockAddr::from_libc_sockaddr(addr)
-        };
-        match addr_opt {
-            Some(SockAddr::Inet(addr)) => Some(addr.to_std()),
-            _ => None,
-        }
-    }
-
-    /// Returns connection state.
-    pub fn state(&self) -> UtpState {
-        unsafe {
-            let state = (*self.inner).args1.state;
-            std::mem::transmute(state)
-        }
-    }
-
-    /// Returns immutable slice to the buffer used for a specific callback, say `on_read`.
-    pub fn buf(&self) -> &[u8] {
-        unsafe {
-            let buf = (*self.inner).buf;
-            let buf_len = (*self.inner).len;
-            std::slice::from_raw_parts(buf, buf_len)
-        }
-    }
-
-    /// Returns Rustish uTP context object.
-    pub fn context(&self) -> UtpContext {
-        unsafe { UtpContext::wrap((*self.inner).context) }
-    }
-}
-
-unsafe extern "C" fn callback_on_read(_arg1: *mut utp_callback_arguments) -> uint64 {
-    println!("read something");
-    0
-}
-
-unsafe extern "C" fn callback_sendto(_arg1: *mut utp_callback_arguments) -> uint64 {
-    let args = UtpCallbackArgs::wrap(_arg1);
-    println!("sendto: {:?}", args.address());
-
-    if let Some(addr) = args.address() {
-        if let Some(sock) = args.context().get_user_data::<UdpSocket>() {
-            sock.send_to(args.buf(), addr);
-        }
-    }
-
-    0
-}
-
-unsafe extern "C" fn callback_on_error(_arg1: *mut utp_callback_arguments) -> uint64 {
-    println!("error");
-    0
-}
-
-unsafe extern "C" fn callback_on_accept(_arg1: *mut utp_callback_arguments) -> uint64 {
-    let args = UtpCallbackArgs::wrap(_arg1);
-    println!("on_accept: {:?}", args.address());
-    0
-}
-
-unsafe extern "C" fn callback_on_state_change(_arg1: *mut utp_callback_arguments) -> uint64 {
-    let args = UtpCallbackArgs::wrap(_arg1);
-    println!("state: {:?}", args.state());
-    0
-}
-
-/// During this call `buf` argument is 0 terminated string, `len` is undefined.
-unsafe extern "C" fn callback_log(_arg1: *mut utp_callback_arguments) -> uint64 {
-    let log = CStr::from_ptr((*_arg1).buf as *const c_char).to_string_lossy();
-    println!("{}", log);
-    0
-}
-
-fn client(utp: UtpContext) -> io::Result<()> {
+fn client(mut utp: UtpContext<Option<UdpSocket>>) -> io::Result<()> {
     let socket = UdpSocket::bind("127.0.0.1:0")?;
-    utp.set_user_data(&socket);
+    *utp.user_data_mut() = Some(socket);
 
-    let sock = unsafe { utp_create_socket(utp.ctx) };
-    let dst_sockaddr = SockAddr::new_inet(InetAddr::from_std(&"127.0.0.1:34254".parse().unwrap()));
-    let (sockaddr, socklen) = unsafe { dst_sockaddr.as_ffi_pair() };
-
-    let res = unsafe { utp_connect(sock, sockaddr, socklen) };
-    println!("conn_res {}", res);
-
-    let buf = vec![1, 2, 3];
-    let res = unsafe { utp_write(sock, buf.as_ptr() as *mut _, buf.len()) };
-    println!("res {}", res);
+    let sock = utp
+        .connect(addr!("127.0.0.1:34254"))
+        .expect("Failed to make uTP connection");
+    let res = sock.send(&vec![1, 2, 3]);
+    println!("client send: {}", res);
 
     Ok(())
 }
 
-fn server(mut utp: UtpContext) -> io::Result<()> {
+fn server(mut utp: UtpContext<Option<UdpSocket>>) -> io::Result<()> {
     let socket = UdpSocket::bind("127.0.0.1:34254")?;
-    utp.set_user_data(&socket);
+    *utp.user_data_mut() = Some(socket);
 
-    utp.set_callback(UtpCallbackType::OnAccept, Some(callback_on_accept));
+    utp.set_callback(
+        UtpCallbackType::OnAccept,
+        Box::new(|args: UtpCallbackArgs<Option<UdpSocket>>| {
+            println!("on_accept: {:?}", args.address());
+            0
+        }),
+    );
 
+    let socket = utp.user_data().as_ref().unwrap();
     loop {
         let mut buf = [0; 100];
-        let (amt, src) = socket.recv_from(&mut buf)?;
-
-        let src_sockaddr = SockAddr::new_inet(InetAddr::from_std(&src));
-        let (sockaddr, socklen) = unsafe { src_sockaddr.as_ffi_pair() };
-
-        let res = unsafe { utp_process_udp(utp.ctx, buf.as_ptr(), amt, sockaddr, socklen) };
-        println!("{}", res);
+        let (bytes_received, sender_addr) = socket.recv_from(&mut buf)?;
+        let res = utp.process_udp(&buf[..bytes_received], sender_addr);
+        println!("utp_process: {}", res);
     }
 
     Ok(())
 }
 
 fn main() -> io::Result<()> {
-    let mut utp = UtpContext::new();
-
-    utp.context_set_option(UTP_LOG_DEBUG, 1);
-
-    utp.set_callback(UtpCallbackType::Log, Some(callback_log));
-    utp.set_callback(UtpCallbackType::OnError, Some(callback_on_error));
-    utp.set_callback(UtpCallbackType::OnRead, Some(callback_on_read));
-    utp.set_callback(UtpCallbackType::Sendto, Some(callback_sendto));
+    let mut utp: UtpContext<Option<UdpSocket>> = UtpContext::new(None);
+    utp.set_debug_log(true);
+    utp.set_callback(
+        UtpCallbackType::Log,
+        Box::new(|args| {
+            let log_msg = args.buf_as_string();
+            println!("{}", log_msg);
+            0
+        }),
+    );
+    utp.set_callback(
+        UtpCallbackType::OnError,
+        Box::new(|_| {
+            println!("error");
+            0
+        }),
+    );
+    utp.set_callback(
+        UtpCallbackType::OnRead,
+        Box::new(|_| {
+            println!("read something");
+            0
+        }),
+    );
+    utp.set_callback(
+        UtpCallbackType::Sendto,
+        Box::new(|args| {
+            println!("sendto: {:?}", args.address());
+            if let Some(addr) = args.address() {
+                if let Some(ref sock) = args.user_data() {
+                    sock.send_to(args.buf(), addr).unwrap();
+                }
+            }
+            0
+        }),
+    );
     utp.set_callback(
         UtpCallbackType::OnStateChange,
-        Some(callback_on_state_change),
+        Box::new(|args| {
+            println!("state: {:?}", args.state());
+            0
+        }),
     );
 
     if env::args().collect::<Vec<_>>().len() > 1 {
