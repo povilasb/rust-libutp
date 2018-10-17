@@ -1,4 +1,4 @@
-#![allow(non_camel_case_types, non_upper_case_globals, unused)]
+#![allow(non_camel_case_types, non_upper_case_globals, unused, unsafe_code)]
 #![cfg_attr(feature = "cargo-clippy", allow(decimal_literal_representation, unreadable_literal,
     trivially_copy_pass_by_ref, const_static_lifetime, useless_transmute))]
 
