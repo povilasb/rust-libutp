@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use libc;
 use nix::sys::socket::{sockaddr, InetAddr, SockAddr};
 use std::collections::HashMap;
@@ -8,27 +10,49 @@ use std::{mem, slice};
 
 use utp_sys::*;
 
+/// Identifies uTP callback.
 #[derive(Hash, Eq, PartialEq)]
 #[repr(u32)]
 pub enum UtpCallbackType {
+    /// With this callback you can allow/reject connections based on some criteria.
     OnFirewall = UTP_ON_FIREWALL,
+    /// Called when new incoming connection was accepted.
     OnAccept = UTP_ON_ACCEPT,
+    /// Called when successfully connectedto uTP server.
     OnConnect = UTP_ON_CONNECT,
+    /// Called if any error happened.
     OnError = UTP_ON_ERROR,
+    /// Called when uTP data packet received.
     OnRead = UTP_ON_READ,
-    OnOverhead = UTP_ON_OVERHEAD_STATISTICS,
+    /// This callback allows to collect statistics for misc packets: connect, data, ack, etc.
+    /// Overhead is UDP + uTP header.
+    OnOverheadStatistics = UTP_ON_OVERHEAD_STATISTICS,
+    /// Called when uTP state changes.
     OnStateChange = UTP_ON_STATE_CHANGE,
+    /// This one is very important for congestion control. It asks for remaining receive buffer
+    /// size - how much more bytes can uTP receive.
     GetReadBufferSize = UTP_GET_READ_BUFFER_SIZE,
+    /// uTP tracks delay between peers. You can use this callback to get those delay samples
+    /// every time they are recalculated.
     OnDelaySample = UTP_ON_DELAY_SAMPLE,
+    /// Allows to provide the initial UDP maximum transfer unit size for the uTP library.
     GetUdpMtu = UTP_GET_UDP_MTU,
+    /// Allows to specify UDP header size - overhead for uTP data.
     GetUdpOverhead = UTP_GET_UDP_OVERHEAD,
+    /// We must give current time in milliseconds when uTP asks.
     GetMiliseconds = UTP_GET_MILLISECONDS,
+    /// We must give current time in microseconds when uTP asks.
     GetMicroseconds = UTP_GET_MICROSECONDS,
+    /// Give some random number to uTP.
     GetRandom = UTP_GET_RANDOM,
+    /// Each log message results in this callback. Do with the message what you want.
     Log = UTP_LOG,
+    /// When uTP libray has some uTP packets ready, this callback is called with a raw packet
+    /// representation. Then you can send this packet over UDP.
     Sendto = UTP_SENDTO,
 }
 
+/// uTP connection state
 #[derive(Debug, PartialEq)]
 #[repr(u32)]
 pub enum UtpState {
@@ -47,6 +71,16 @@ pub enum UtpState {
     Destroying = UTP_STATE_DESTROYING,
 }
 
+// TODO(povilas): wrap utp context options:
+//
+// UTP_LOG_NORMAL,
+// UTP_LOG_MTU,
+// UTP_LOG_DEBUG,
+// UTP_SNDBUF,
+// UTP_RCVBUF,
+// UTP_TARGET_DELAY,
+
+/// Function type that will be called when some uTP event happens.
 pub type UtpCallback<T> = Box<Fn(UtpCallbackArgs<T>) -> u64>;
 
 /// libutp is capable of holding arbitrary user data. We will use this structure to hold our
@@ -58,25 +92,25 @@ struct UtpUserData<T> {
 
 impl<T> UtpUserData<T> {
     fn new(data: T) -> Self {
-        let nop = Box::new(|_| 0); // no operation - a.k.a do nothing
-                                   // default callbacks do nothing.
+        // no operation - a.k.a do nothing default callbacks do nothing.
+        let nop = Box::new(|_| 0);
         let mut callbacks: HashMap<UtpCallbackType, UtpCallback<T>> = HashMap::new();
-        callbacks.insert(UtpCallbackType::OnFirewall, nop.clone());
-        callbacks.insert(UtpCallbackType::OnAccept, nop.clone());
-        callbacks.insert(UtpCallbackType::OnConnect, nop.clone());
-        callbacks.insert(UtpCallbackType::OnError, nop.clone());
-        callbacks.insert(UtpCallbackType::OnRead, nop.clone());
-        callbacks.insert(UtpCallbackType::OnOverhead, nop.clone());
-        callbacks.insert(UtpCallbackType::OnStateChange, nop.clone());
-        callbacks.insert(UtpCallbackType::GetReadBufferSize, nop.clone());
-        callbacks.insert(UtpCallbackType::OnDelaySample, nop.clone());
-        callbacks.insert(UtpCallbackType::GetUdpMtu, nop.clone());
-        callbacks.insert(UtpCallbackType::GetUdpOverhead, nop.clone());
-        callbacks.insert(UtpCallbackType::GetMiliseconds, nop.clone());
-        callbacks.insert(UtpCallbackType::GetMicroseconds, nop.clone());
-        callbacks.insert(UtpCallbackType::GetRandom, nop.clone());
-        callbacks.insert(UtpCallbackType::Log, nop.clone());
-        callbacks.insert(UtpCallbackType::Sendto, nop);
+        let _ = callbacks.insert(UtpCallbackType::OnFirewall, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::OnAccept, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::OnConnect, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::OnError, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::OnRead, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::OnOverheadStatistics, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::OnStateChange, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::GetReadBufferSize, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::OnDelaySample, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::GetUdpMtu, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::GetUdpOverhead, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::GetMiliseconds, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::GetMicroseconds, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::GetRandom, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::Log, nop.clone());
+        let _ = callbacks.insert(UtpCallbackType::Sendto, nop);
 
         Self { data, callbacks }
     }
@@ -139,7 +173,9 @@ impl<T> UtpContext<T> {
         // NOTE: don't forget to destroy this user data.
         // TODO(povilas): guard user data with mutex?
         let utp_user_data = Box::new(UtpUserData::new(user_data));
-        unsafe { utp_context_set_userdata(ctx, Box::into_raw(utp_user_data) as *mut _) };
+        unsafe {
+            let _ = utp_context_set_userdata(ctx, Box::into_raw(utp_user_data) as *mut _);
+        };
 
         init_callbacks::<T>(ctx);
         Self {
@@ -148,22 +184,29 @@ impl<T> UtpContext<T> {
         }
     }
 
+    /// Returns reference to arbitrary user data stored in uTP context.
     pub fn user_data(&self) -> &T {
         &self.utp_user_data().data
     }
 
+    /// Returns mutable reference to arbitrary user data stored in uTP context.
     pub fn user_data_mut(&mut self) -> &mut T {
         let user_data = get_user_data_mut::<UtpUserData<T>>(self.ctx)
             .expect("uTP user data must be always set.");
         &mut user_data.data
     }
 
+    /// Sets some internal uTP context options.
     pub fn set_option(&mut self, opt: u32, val: i32) {
-        unsafe { utp_context_set_option(self.ctx, opt as i32, val) };
+        unsafe {
+            let _ = utp_context_set_option(self.ctx, opt as i32, val);
+        };
     }
 
+    /// Set uTP callback. The underlying libutp uses callbacks to react to asyncrhonous evens:
+    /// on data read, on connection established, etc.
     pub fn set_callback(&mut self, cb_type: UtpCallbackType, cb: UtpCallback<T>) {
-        self.utp_user_data_mut().callbacks.insert(cb_type, cb);
+        let _ = self.utp_user_data_mut().callbacks.insert(cb_type, cb);
     }
 
     /// Feed UDP packet to underlying uTP library that will process it and react appropriately:
@@ -180,6 +223,7 @@ impl<T> UtpContext<T> {
     }
 
     // TODO(povilas): return proper Rust error instead of i32
+    /// Attempt to make a uTP connection to a given address.
     pub fn connect(&mut self, addr: SocketAddr) -> Result<UtpSocket, i32> {
         let (sockaddr, socklen) = c_sock_addr(addr);
         let (sock, res) = unsafe {
@@ -247,7 +291,7 @@ fn init_callbacks<T>(ctx: *mut utp_context) {
     set_callback!(UtpCallbackType::OnAccept);
     set_callback!(UtpCallbackType::OnError);
     set_callback!(UtpCallbackType::OnRead);
-    // set_callback!(UtpCallbackType::OnOverhead);
+    // set_callback!(UtpCallbackType::OnOverheadStatistics);
     set_callback!(UtpCallbackType::OnStateChange);
     // set_callback!(UtpCallbackType::GetReadBufferSize);
     // set_callback!(UtpCallbackType::OnDelaySample);
@@ -366,7 +410,7 @@ impl<T> Drop for UtpContext<T> {
     fn drop(&mut self) {
         unsafe {
             let user_data_ptr = utp_context_get_userdata(self.ctx) as *mut UtpUserData<T>;
-            Box::from_raw(user_data_ptr); // this will make sure UserData is dropped properly.
+            let _ = Box::from_raw(user_data_ptr); // this will make sure UserData is dropped properly.
             utp_destroy(self.ctx);
         }
     }
