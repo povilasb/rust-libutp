@@ -4,5 +4,6 @@ extern crate libc;
 extern crate nix;
 
 mod utp;
+mod utp_sys;
 
 pub use utp::*;

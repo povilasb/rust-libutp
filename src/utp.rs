@@ -1,17 +1,12 @@
-#![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
-#![allow(unsafe_code)]
-
-include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
-
 use libc;
-use nix::sys::socket::{sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage, InetAddr, SockAddr};
+use nix::sys::socket::{sockaddr, InetAddr, SockAddr};
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::marker::PhantomData;
 use std::net::{Shutdown, SocketAddr};
 use std::{mem, slice};
+
+use utp_sys::*;
 
 #[derive(Hash, Eq, PartialEq)]
 #[repr(u32)]
