@@ -10,6 +10,8 @@ use std::{mem, slice};
 
 use utp_sys::*;
 
+const MAX_SIZE: isize = isize::max_value();
+
 /// Identifies uTP callback.
 #[derive(Hash, Eq, PartialEq)]
 #[repr(u32)]
@@ -80,6 +82,19 @@ pub enum UtpState {
 // UTP_RCVBUF,
 // UTP_TARGET_DELAY,
 
+/// Will cover all uTP errors.
+#[derive(Debug, PartialEq)]
+pub enum UtpError {
+    /// Failure to write data to uTP socket. The reason is unknown because the underlying C library
+    /// doesn't expose more info.
+    SendFailed,
+    /// 0 bytes were writen to uTP socket which means that we should wait until the socket gets
+    /// writable again.
+    WouldBlock,
+    /// Call to libutp returned the unexpected value which we can't interpret.
+    UnexpectedResult(i64),
+}
+
 /// Function type that will be called when some uTP event happens.
 pub type UtpCallback<T> = Box<Fn(UtpCallbackArgs<T>) -> u64>;
 
@@ -128,9 +143,14 @@ impl UtpSocket {
     }
 
     /// Write some data to uTP socket and return the result.
-    // TODO(povilas): wrap isize to Result
-    pub fn send(&self, buf: &[u8]) -> isize {
-        unsafe { utp_write(self.inner, buf.as_ptr() as *mut _, buf.len()) }
+    pub fn send(&self, buf: &[u8]) -> Result<usize, UtpError> {
+        let res = unsafe { utp_write(self.inner, buf.as_ptr() as *mut _, buf.len()) };
+        match res {
+            -1 => Err(UtpError::SendFailed),
+            0 => Err(UtpError::WouldBlock),
+            bytes_sent @ 1...MAX_SIZE => Ok(bytes_sent as usize),
+            unknown => Err(UtpError::UnexpectedResult(unknown as i64)),
+        }
     }
 
     /// Shutdown reads and/or writes on the socket.

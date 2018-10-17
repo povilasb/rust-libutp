@@ -48,8 +48,7 @@ fn run_evloop(events_rx: mpsc::Receiver<AppEvent>, mut utp: UtpContext<Arc<UdpSo
                 assert_eq!(res, 1);
             }
             AppEvent::Stdin(line) => {
-                let res = utp_socket.send(&line.into_bytes()[..]);
-                assert!(res > 0);
+                let _ = unwrap!(utp_socket.send(&line.into_bytes()[..]));
             }
         }
     }
