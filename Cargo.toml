@@ -9,5 +9,13 @@ bindgen = "~0.42.1"
 
 [dependencies]
 libc = "0.2"
-net-literals = "0.1.2"
+mio-extras = "2.0.5"
 nix = "0.11"
+
+[dev-dependencies]
+clap = "2.32.0"
+env_logger = "0.5.13"
+log = "0.4.5"
+mio = "0.6.16"
+net-literals = "0.1.2"
+unwrap = "1.2.1"

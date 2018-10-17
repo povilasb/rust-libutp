@@ -1,15 +1,16 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+#![allow(unsafe_code)]
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-use libc::{self, c_char};
+use libc;
 use nix::sys::socket::{sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage, InetAddr, SockAddr};
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::marker::PhantomData;
-use std::net::{Shutdown, SocketAddr, UdpSocket};
+use std::net::{Shutdown, SocketAddr};
 use std::{mem, slice};
 
 #[derive(Hash, Eq, PartialEq)]
@@ -33,7 +34,7 @@ pub enum UtpCallbackType {
     Sendto = UTP_SENDTO,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 #[repr(u32)]
 pub enum UtpState {
     /// socket has reveived syn-ack (notification only for outgoing connection completion)
@@ -156,7 +157,7 @@ impl<T> UtpContext<T> {
         &self.utp_user_data().data
     }
 
-    pub fn user_data_mut(&self) -> &mut T {
+    pub fn user_data_mut(&mut self) -> &mut T {
         let user_data = get_user_data_mut::<UtpUserData<T>>(self.ctx)
             .expect("uTP user data must be always set.");
         &mut user_data.data
@@ -200,11 +201,24 @@ impl<T> UtpContext<T> {
         }
     }
 
+    /// Sends all deferred ACK packets.
+    /// This method should be called when real UDP socket becomes unreadable - returns EWOULDBLOCK.
+    pub fn ack_packets(&self) {
+        unsafe {
+            utp_issue_deferred_acks(self.ctx);
+        }
+    }
+
+    /// Checks for timedout connections. Should be called every 500ms.
+    pub fn check_timeouts(&mut self) {
+        unsafe { utp_check_timeouts(self.ctx) }
+    }
+
     fn utp_user_data(&self) -> &UtpUserData<T> {
         get_user_data::<UtpUserData<T>>(self.ctx).expect("uTP user data must be always set.")
     }
 
-    fn utp_user_data_mut(&self) -> &mut UtpUserData<T> {
+    fn utp_user_data_mut(&mut self) -> &mut UtpUserData<T> {
         get_user_data_mut::<UtpUserData<T>>(self.ctx).expect("uTP user data must be always set.")
     }
 }
@@ -302,11 +316,18 @@ impl<T> UtpCallbackArgs<T> {
         &self.utp_user_data().data
     }
 
+    /// Acknowledges received data.
+    /// This function must be called from `OnRead` callback otherwise received data won't
+    /// be acknowledged.
+    pub fn ack_data(&mut self) {
+        unsafe { utp_read_drained((*self.inner).socket) }
+    }
+
     /// In some cases (e.g. logging), `buf` argument holds a C style, 0 terminated, string.
     /// This function converts such string into Rust `String`.
     pub fn buf_as_string(&self) -> String {
         unsafe {
-            CStr::from_ptr((*self.inner).buf as *const c_char)
+            CStr::from_ptr((*self.inner).buf as *const libc::c_char)
                 .to_string_lossy()
                 .into_owned()
         }
