@@ -15,13 +15,14 @@ extern crate nix;
 extern crate net_literals;
 
 use clap::{App, Arg};
+use mio::net::UdpSocket;
 use mio::unix::EventedFd;
 use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::channel::{
     channel as async_channel, Receiver as AsyncReceiver, Sender as AsyncSender,
 };
 use std::io;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::os::unix::io::RawFd;
 use std::sync::Arc;
 use utp::{UtpCallbackArgs, UtpCallbackType, UtpContext, UtpSocket, UtpState};
@@ -58,13 +59,13 @@ struct MioEventHandlers {
 }
 
 struct ClientData {
-    udp_socket: Arc<mio::net::UdpSocket>,
+    udp_socket: Arc<UdpSocket>,
     connected_tx: AsyncSender<()>,
     utp_writable_tx: AsyncSender<()>,
 }
 
 impl ClientData {
-    fn new(udp_socket: Arc<mio::net::UdpSocket>) -> (Self, MioEventHandlers) {
+    fn new(udp_socket: Arc<UdpSocket>) -> (Self, MioEventHandlers) {
         let (connected_tx, connected_rx) = async_channel();
         let (utp_writable_tx, utp_writable_rx) = async_channel();
         (
@@ -89,7 +90,7 @@ const UTP_WRITABLE_TOKEN: Token = Token(3);
 
 struct UtpClient {
     evloop: Poll,
-    udp_socket: Arc<mio::net::UdpSocket>,
+    udp_socket: Arc<UdpSocket>,
     utp: UtpContext<ClientData>,
     event_handlers: MioEventHandlers,
     buf: Vec<u8>,
@@ -102,7 +103,7 @@ impl UtpClient {
     fn new(buffer_size: usize) -> io::Result<Self> {
         let evloop = Poll::new()?;
 
-        let udp_socket = Arc::new(mio::net::UdpSocket::bind(&addr!("0.0.0.0:0"))?);
+        let udp_socket = Arc::new(UdpSocket::bind(&addr!("0.0.0.0:0"))?);
         let (client_data, event_handlers) = ClientData::new(Arc::clone(&udp_socket));
         let utp = make_client_utp_ctx(client_data);
 
@@ -152,38 +153,16 @@ impl UtpClient {
         self.flush_input_buffer(utp_socket);
     }
 
-    fn on_udp_socket_readable(&self) -> io::Result<()> {
+    fn handle_event(&mut self, event: mio::Event, utp_socket: &UtpSocket) -> io::Result<()> {
         // we don't need big socket buffer, cause client doesn't expect data packets
         let mut sock_buf = [0; 4096];
 
-        loop {
-            match self.udp_socket.recv_from(&mut sock_buf) {
-                Ok((bytes_read, sender_addr)) => {
-                    let res = self.utp.process_udp(&sock_buf[..bytes_read], sender_addr);
-                    assert_eq!(res, 1);
-                }
-                Err(e) => {
-                    if e.kind() == io::ErrorKind::WouldBlock {
-                        self.utp.ack_packets();
-                        break;
-                    } else {
-                        return Err(e);
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn handle_event(&mut self, event: mio::Event, utp_socket: &UtpSocket) -> io::Result<()> {
         match event.token() {
             UTP_WRITABLE_TOKEN => {
                 unwrap!(self.event_handlers.utp_writable_rx.try_recv());
                 self.flush_input_buffer(&utp_socket);
             }
-            SOCKET_TOKEN => {
-                self.on_udp_socket_readable()?;
-            }
+            SOCKET_TOKEN => handle_udp(&self.udp_socket, &mut sock_buf[..], &self.utp)?,
             CONNECTED_RX_TOKEN => {
                 // We're only interested in stdin, when we are connected with the server
                 self.evloop.register(
@@ -275,7 +254,7 @@ fn make_client_utp_ctx(data: ClientData) -> UtpContext<ClientData> {
 
 /// Runs the server that receives uTP packets and prints them to stdout.
 fn run_server(listen_port: u16, buffer_size: usize) -> io::Result<()> {
-    let socket = UdpSocket::bind(SocketAddr::V4(SocketAddrV4::new(
+    let socket = UdpSocket::bind(&SocketAddr::V4(SocketAddrV4::new(
         Ipv4Addr::new(0, 0, 0, 0),
         listen_port,
     )))?;
@@ -284,17 +263,48 @@ fn run_server(listen_port: u16, buffer_size: usize) -> io::Result<()> {
     let mut buf: Vec<u8> = Vec::with_capacity(buffer_size);
     unsafe { buf.set_len(buffer_size) }
 
+    let evloop = Poll::new()?;
+    evloop.register(
+        socket,
+        SOCKET_TOKEN,
+        Ready::readable(), // I just assume that UDP socket is always writable
+        PollOpt::edge(),
+    )?;
+
+    let mut events = Events::with_capacity(1024);
     loop {
-        let (bytes_received, sender_addr) = socket.recv_from(&mut buf)?;
-        let res = utp.process_udp(&buf[..bytes_received], sender_addr);
-        debug_assert_eq!(res, 1);
-        // TODO(povilas): ack only when recv_from returns EWOULDBLOCK? - could improve performance
-        utp.ack_packets();
+        evloop.poll(&mut events, None)?;
+        for ev in events.iter() {
+            match ev.token() {
+                SOCKET_TOKEN => handle_udp(&socket, &mut buf[..], &utp)?,
+                _ => panic!("Unexpected mio token polled"),
+            }
+        }
     }
 }
 
-fn make_server_utp_ctx(socket: UdpSocket) -> UtpContext<UdpSocket> {
-    let mut utp = make_utp_ctx(socket);
+fn handle_udp<T>(socket: &UdpSocket, buf: &mut [u8], utp: &UtpContext<T>) -> io::Result<()> {
+    loop {
+        match socket.recv_from(buf) {
+            Ok((bytes_read, sender_addr)) => {
+                let res = utp.process_udp(&buf[..bytes_read], sender_addr);
+                assert_eq!(res, 1);
+            }
+            Err(e) => {
+                if e.kind() == io::ErrorKind::WouldBlock {
+                    utp.ack_packets();
+                    break;
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn make_server_utp_ctx(data: UdpSocket) -> UtpContext<UdpSocket> {
+    let mut utp = make_utp_ctx(data);
 
     utp.set_callback(
         UtpCallbackType::OnRead,
@@ -317,7 +327,7 @@ fn make_server_utp_ctx(socket: UdpSocket) -> UtpContext<UdpSocket> {
         Box::new(|args| {
             if let Some(addr) = args.address() {
                 let sock = args.user_data();
-                sock.send_to(args.buf(), addr).unwrap();
+                sock.send_to(args.buf(), &addr).unwrap();
             }
             0
         }),
@@ -367,8 +377,9 @@ fn parse_cli_args() -> Result<CliArgs, clap::Error> {
             Arg::with_name("buffer_size")
                 .short("B")
                 .value_name("BUFFER_SIZE")
-                .help("Buffer size for incoming data. Default is 65487 bytes - max uTP data length.")
-                .takes_value(true),
+                .help(
+                    "Buffer size for incoming data. Default is 65487 bytes - max uTP data length.",
+                ).takes_value(true),
         ).arg(
             Arg::with_name("dst_ip")
                 .value_name("DESTINATION_IP")
