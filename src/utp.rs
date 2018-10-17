@@ -34,7 +34,7 @@ pub enum UtpCallbackType {
     Sendto = UTP_SENDTO,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 #[repr(u32)]
 pub enum UtpState {
     /// socket has reveived syn-ack (notification only for outgoing connection completion)
@@ -204,7 +204,14 @@ impl<T> UtpContext<T> {
     /// Sends all deferred ACK packets.
     /// This method should be called when real UDP socket becomes unreadable - returns EWOULDBLOCK.
     pub fn ack_packets(&self) {
-        unsafe { utp_issue_deferred_acks(self.ctx); }
+        unsafe {
+            utp_issue_deferred_acks(self.ctx);
+        }
+    }
+
+    /// Checks for timedout connections. Should be called every 500ms.
+    pub fn check_timeouts(&mut self) {
+        unsafe { utp_check_timeouts(self.ctx) }
     }
 
     fn utp_user_data(&self) -> &UtpUserData<T> {
