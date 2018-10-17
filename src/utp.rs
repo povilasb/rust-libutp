@@ -218,7 +218,7 @@ impl<T> UtpContext<T> {
         get_user_data::<UtpUserData<T>>(self.ctx).expect("uTP user data must be always set.")
     }
 
-    fn utp_user_data_mut(&self) -> &mut UtpUserData<T> {
+    fn utp_user_data_mut(&mut self) -> &mut UtpUserData<T> {
         get_user_data_mut::<UtpUserData<T>>(self.ctx).expect("uTP user data must be always set.")
     }
 }
