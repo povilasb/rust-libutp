@@ -1,9 +1,8 @@
-#![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
-#![allow(unsafe_code, unused)]
+#![allow(non_camel_case_types, non_upper_case_globals, unused)]
+#![cfg_attr(feature = "cargo-clippy", allow(decimal_literal_representation, unreadable_literal,
+    trivially_copy_pass_by_ref, const_static_lifetime, useless_transmute))]
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-use nix::sys::socket::{sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage, InetAddr, SockAddr};
 use libc;
+use nix::sys::socket::{sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage, InetAddr, SockAddr};
