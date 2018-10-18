@@ -228,7 +228,12 @@ fn make_client_utp_ctx(data: ClientData) -> UtpContext<ClientData> {
         Box::new(|args| {
             let addr = unwrap!(args.address());
             let client_data = args.user_data();
-            client_data.udp_socket.send_to(args.buf(), &addr).unwrap();
+            match client_data.udp_socket.send_to(args.buf(), &addr) {
+                Ok(bytes_sent) => assert_eq!(args.buf().len(), bytes_sent),
+                Err(e) => if e.kind() != io::ErrorKind::WouldBlock {
+                    panic!("UDP error: {}", e);
+                },
+            }
             0
         }),
     );
