@@ -45,14 +45,18 @@
 
 extern crate libc;
 extern crate nix;
+#[macro_use]
+extern crate quick_error;
 
 mod callback;
 mod ctx;
+mod error;
 mod socket;
 mod utp_sys;
 
 pub use callback::{UtpCallback, UtpCallbackArgs, UtpCallbackType};
 pub use ctx::UtpContext;
+pub use error::UtpError;
 pub use socket::UtpSocket;
 
 use utp_sys::*;
@@ -74,23 +78,6 @@ pub enum UtpState {
     /// socket is being destroyed, meaning all data has been sent if possible.
     /// it is not valid to refer to the socket after this state change occurs
     Destroying = UTP_STATE_DESTROYING,
-}
-
-/// Will cover all uTP errors.
-#[derive(Debug, PartialEq)]
-pub enum UtpError {
-    /// Failure to write data to uTP socket. The reason is unknown because the underlying C library
-    /// doesn't expose more info.
-    SendFailed,
-    /// Failure to connect with remote peer.
-    ConnectFailed,
-    /// 0 bytes were writen to uTP socket which means that we should wait until the socket gets
-    /// writable again.
-    WouldBlock,
-    /// Call to libutp returned the unexpected value which we can't interpret.
-    UnexpectedResult(i64),
-    /// Given UDP packet was illegal uTP packet.
-    IllegalPacket,
 }
 
 // TODO(povilas): wrap utp context options:
