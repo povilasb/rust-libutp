@@ -23,6 +23,7 @@ enum AppEvent {
 }
 
 fn main() -> io::Result<()> {
+    println!("Type messages and hit ENTER to send to the server. Type '/q' to exit.");
     let udp_socket = Arc::new(UdpSocket::bind("0.0.0.0:0")?);
     let utp = make_utp_ctx(Arc::clone(&udp_socket));
 
@@ -47,6 +48,9 @@ fn run_evloop(events_rx: mpsc::Receiver<AppEvent>, mut utp: UtpContext<Arc<UdpSo
                 unwrap!(utp.process_udp(&packet[..], sender_addr));
             }
             AppEvent::Stdin(line) => {
+                if line == "/q".to_owned() {
+                    break;
+                }
                 let _ = unwrap!(utp_socket.send(&line.into_bytes()[..]));
             }
         }
@@ -66,9 +70,7 @@ fn spawn_udp_reader(socket: Arc<UdpSocket>, events_tx: mpsc::Sender<AppEvent>) {
     thread::spawn(move || {
         let mut buf = vec![0; 4096];
         loop {
-            println!("receiving udp");
             let (bytes_received, client_addr) = unwrap!(socket.recv_from(&mut buf));
-            println!("received udp");
             unwrap!(events_tx.send(AppEvent::UdpPacket((
                 buf[..bytes_received].to_vec(),
                 client_addr
@@ -79,7 +81,7 @@ fn spawn_udp_reader(socket: Arc<UdpSocket>, events_tx: mpsc::Sender<AppEvent>) {
 
 fn make_utp_ctx(socket: Arc<UdpSocket>) -> UtpContext<Arc<UdpSocket>> {
     let mut utp = UtpContext::new(socket);
-    utp.set_debug_log(true);
+    // utp.set_debug_log(true);
     utp.set_callback(
         UtpCallbackType::Log,
         Box::new(|args| {
@@ -98,7 +100,6 @@ fn make_utp_ctx(socket: Arc<UdpSocket>) -> UtpContext<Arc<UdpSocket>> {
     utp.set_callback(
         UtpCallbackType::Sendto,
         Box::new(|args| {
-            println!("sendto: {:?}", args.address());
             if let Some(addr) = args.address() {
                 let sock = args.user_data();
                 sock.send_to(args.buf(), addr).unwrap();
