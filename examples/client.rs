@@ -44,8 +44,7 @@ fn run_evloop(events_rx: mpsc::Receiver<AppEvent>, mut utp: UtpContext<Arc<UdpSo
         let event = unwrap!(events_rx.recv());
         match event {
             AppEvent::UdpPacket((packet, sender_addr)) => {
-                let res = utp.process_udp(&packet[..], sender_addr);
-                assert_eq!(res, 1);
+                unwrap!(utp.process_udp(&packet[..], sender_addr));
             }
             AppEvent::Stdin(line) => {
                 let _ = unwrap!(utp_socket.send(&line.into_bytes()[..]));

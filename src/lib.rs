@@ -82,11 +82,15 @@ pub enum UtpError {
     /// Failure to write data to uTP socket. The reason is unknown because the underlying C library
     /// doesn't expose more info.
     SendFailed,
+    /// Failure to connect with remote peer.
+    ConnectFailed,
     /// 0 bytes were writen to uTP socket which means that we should wait until the socket gets
     /// writable again.
     WouldBlock,
     /// Call to libutp returned the unexpected value which we can't interpret.
     UnexpectedResult(i64),
+    /// Given UDP packet was illegal uTP packet.
+    IllegalPacket,
 }
 
 // TODO(povilas): wrap utp context options:

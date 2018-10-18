@@ -2,6 +2,7 @@
 
 #![allow(unsafe_code)]
 
+use super::UtpError;
 use callback::{get_user_data_from_args, UtpCallback, UtpCallbackArgs, UtpCallbackType};
 use nix::sys::socket::{sockaddr, InetAddr, SockAddr};
 use socket::{make_utp_socket, UtpSocket};
@@ -64,10 +65,15 @@ impl<T> UtpContext<T> {
 
     /// Feed UDP packet to underlying uTP library that will process it and react appropriately:
     /// e.g. terminate connection or call `UtpCallbackType::OnRead` callback, etc.
-    // TODO(povilas): return proper Rust result instead of i32
-    pub fn process_udp(&self, packet: &[u8], sender_addr: SocketAddr) -> i32 {
+    pub fn process_udp(&self, packet: &[u8], sender_addr: SocketAddr) -> Result<(), UtpError> {
         let (sockaddr, socklen) = c_sock_addr(sender_addr);
-        unsafe { utp_process_udp(self.ctx, packet.as_ptr(), packet.len(), &sockaddr, socklen) }
+        let res =
+            unsafe { utp_process_udp(self.ctx, packet.as_ptr(), packet.len(), &sockaddr, socklen) };
+        match res {
+            1 => Ok(()),
+            0 => Err(UtpError::IllegalPacket),
+            result => Err(UtpError::UnexpectedResult(i64::from(result))),
+        }
     }
 
     /// Enables or disables debug logging.
@@ -75,21 +81,20 @@ impl<T> UtpContext<T> {
         self.set_option(UTP_LOG_DEBUG, i32::from(debug_log));
     }
 
-    // TODO(povilas): return proper Rust error instead of i32
     /// Attempt to make a uTP connection to a given address.
-    pub fn connect(&mut self, addr: SocketAddr) -> Result<UtpSocket, i32> {
+    pub fn connect(&mut self, addr: SocketAddr) -> Result<UtpSocket, UtpError> {
         let (sockaddr, socklen) = c_sock_addr(addr);
         let (sock, res) = unsafe {
             let sock = utp_create_socket(self.ctx);
             let res = utp_connect(sock, &sockaddr, socklen);
             (sock, res)
         };
-        if res == 0 {
-            Ok(make_utp_socket(sock))
-        } else {
+        match res {
+            0 => Ok(make_utp_socket(sock)),
             // TODO(povilas): destroy socket handle on error. NOTE: currently there's no way to do
             // this in libutp.
-            Err(res)
+            -1 => Err(UtpError::ConnectFailed),
+            result => Err(UtpError::UnexpectedResult(i64::from(result))),
         }
     }
 

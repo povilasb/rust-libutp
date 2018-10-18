@@ -210,6 +210,7 @@ impl UtpClient {
                 Err(UtpError::UnexpectedResult(res)) => {
                     panic!("Unknown send return value: {}", res)
                 }
+                Err(e) => panic!("Unexpected error: {:?}", e),
             }
         }
         if self.buf_bytes_sent == self.buf_bytes_read {
@@ -285,8 +286,7 @@ fn handle_udp<T>(socket: &UdpSocket, buf: &mut [u8], utp: &UtpContext<T>) -> io:
     loop {
         match socket.recv_from(buf) {
             Ok((bytes_read, sender_addr)) => {
-                let res = utp.process_udp(&buf[..bytes_read], sender_addr);
-                assert_eq!(res, 1);
+                unwrap!(utp.process_udp(&buf[..bytes_read], sender_addr));
             }
             Err(e) => {
                 if e.kind() == io::ErrorKind::WouldBlock {
