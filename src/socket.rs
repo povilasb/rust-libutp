@@ -16,6 +16,8 @@ pub struct UtpSocket {
 
 impl UtpSocket {
     /// Write some data to uTP socket and return the result.
+    /// Partial write is possible - uTP might not accept all the given buffer. In such case it's
+    /// up to you to make sure the rest of the data is sent.
     pub fn send(&self, buf: &[u8]) -> Result<usize, UtpError> {
         let res = unsafe { utp_write(self.inner, buf.as_ptr() as *mut _, buf.len()) };
         match res {
