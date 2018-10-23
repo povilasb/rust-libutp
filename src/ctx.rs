@@ -106,7 +106,8 @@ impl<T> UtpContext<T> {
         }
     }
 
-    /// Checks for timedout connections. Should be called every 500ms.
+    /// Checks for timedout connections, ACK packets, reschedules lost packets, etc.
+    /// Should be called every 500ms - recommendation from libutp.
     pub fn check_timeouts(&mut self) {
         unsafe { utp_check_timeouts(self.ctx) }
     }

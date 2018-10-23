@@ -8,7 +8,7 @@
 // `ConnectFailed` is impossible.
 quick_error! {
     /// Will cover all uTP errors.
-    #[derive(Debug)]
+    #[derive(Debug, PartialEq)]
     pub enum UtpError {
         /// Failure to write data to uTP socket. The reason is unknown because the underlying C library
         /// doesn't expose more info.
