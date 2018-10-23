@@ -12,6 +12,7 @@ use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::channel::{channel as async_channel, Sender as AsyncSender};
 use mio_extras::timer::Timer;
 use rand::RngCore;
+use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 use utp::{UtpCallbackType, UtpContext, UtpError, UtpState};
@@ -28,10 +29,15 @@ mod connect {
 
         let server_udp_socket = Arc::new(unwrap!(UdpSocket::bind(&addr!("127.0.0.1:0"))));
         let server_addr = unwrap!(server_udp_socket.local_addr());
-        let server_utp = make_utp_ctx(Arc::clone(&server_udp_socket), None, None);
+        let server_utp = make_utp_ctx(Arc::clone(&server_udp_socket), None, None, None);
 
         let client_udp_socket = Arc::new(unwrap!(UdpSocket::bind(&addr!("0.0.0.0:0"))));
-        let mut client_utp = make_utp_ctx(Arc::clone(&client_udp_socket), Some(connected_tx), None);
+        let mut client_utp = make_utp_ctx(
+            Arc::clone(&client_udp_socket),
+            Some(connected_tx),
+            None,
+            None,
+        );
         let _client_utp_socket = unwrap!(client_utp.connect(server_addr));
 
         let evloop = unwrap!(Poll::new());
@@ -77,11 +83,16 @@ mod connect {
 
         let udp_socket1 = Arc::new(unwrap!(UdpSocket::bind(&addr!("127.0.0.1:0"))));
         let addr1 = unwrap!(udp_socket1.local_addr());
-        let mut utp1 = make_utp_ctx(Arc::clone(&udp_socket1), Some(connected_tx.clone()), None);
+        let mut utp1 = make_utp_ctx(
+            Arc::clone(&udp_socket1),
+            Some(connected_tx.clone()),
+            None,
+            None,
+        );
 
         let udp_socket2 = Arc::new(unwrap!(UdpSocket::bind(&addr!("127.0.0.1:0"))));
         let addr2 = unwrap!(udp_socket2.local_addr());
-        let mut utp2 = make_utp_ctx(Arc::clone(&udp_socket2), Some(connected_tx), None);
+        let mut utp2 = make_utp_ctx(Arc::clone(&udp_socket2), Some(connected_tx), None, None);
 
         let _utp_socket1 = unwrap!(utp1.connect(addr2));
         let _utp_socket2 = unwrap!(utp2.connect(addr1));
@@ -121,6 +132,60 @@ mod connect {
             }
         }
     }
+
+    #[test]
+    fn on_timeout_on_error_callback_is_called() {
+        const CLIENT_SOCKET_TOKEN: Token = Token(0);
+        const TIMEOUT_TOKEN: Token = Token(1);
+        const ERROR_RX_TOKEN: Token = Token(2);
+        let (error_tx, error_rx) = async_channel();
+
+        let client_udp_socket = Arc::new(unwrap!(UdpSocket::bind(&addr!("0.0.0.0:0"))));
+        let mut client_utp =
+            make_utp_ctx(Arc::clone(&client_udp_socket), None, None, Some(error_tx));
+        let dummy_addr = addr!("15.16.17.123:25");
+        let _client_utp_socket = unwrap!(client_utp.connect(dummy_addr));
+
+        let mut timer = Timer::default();
+        timer.set_timeout(Duration::from_millis(500), ());
+
+        let evloop = unwrap!(Poll::new());
+        unwrap!(evloop.register(
+            &client_udp_socket,
+            CLIENT_SOCKET_TOKEN,
+            Ready::readable(),
+            PollOpt::level(),
+        ));
+        unwrap!(evloop.register(&timer, TIMEOUT_TOKEN, Ready::readable(), PollOpt::edge(),));
+        unwrap!(evloop.register(
+            &error_rx,
+            ERROR_RX_TOKEN,
+            Ready::readable(),
+            PollOpt::level(),
+        ));
+
+        let mut events = Events::with_capacity(16);
+        'main_loop: loop {
+            unwrap!(evloop.poll(&mut events, None));
+            for ev in events.iter() {
+                match ev.token() {
+                    CLIENT_SOCKET_TOKEN => handle_udp_packet(&client_udp_socket, &client_utp),
+                    TIMEOUT_TOKEN => {
+                        client_utp.check_timeouts();
+                        timer.set_timeout(Duration::from_millis(500), ());
+                    }
+                    ERROR_RX_TOKEN => {
+                        let err = unwrap!(error_rx.try_recv());
+                        if err.kind() != io::ErrorKind::TimedOut {
+                            panic!("Unexpeted uTP error: {}", err);
+                        }
+                        break 'main_loop;
+                    }
+                    _ => panic!("Unexpected event"),
+                }
+            }
+        }
+    }
 }
 
 fn exchange_data(byte_count: usize) {
@@ -134,10 +199,20 @@ fn exchange_data(byte_count: usize) {
 
     let server_udp_socket = Arc::new(unwrap!(UdpSocket::bind(&addr!("127.0.0.1:0"))));
     let server_addr = unwrap!(server_udp_socket.local_addr());
-    let mut server_utp = make_utp_ctx(Arc::clone(&server_udp_socket), None, Some(received_data_tx));
+    let mut server_utp = make_utp_ctx(
+        Arc::clone(&server_udp_socket),
+        None,
+        Some(received_data_tx),
+        None,
+    );
 
     let client_udp_socket = Arc::new(unwrap!(UdpSocket::bind(&addr!("0.0.0.0:0"))));
-    let mut client_utp = make_utp_ctx(Arc::clone(&client_udp_socket), Some(writable_tx), None);
+    let mut client_utp = make_utp_ctx(
+        Arc::clone(&client_udp_socket),
+        Some(writable_tx),
+        None,
+        None,
+    );
     let client_utp_socket = unwrap!(client_utp.connect(server_addr));
 
     let mut timer = Timer::default();
@@ -236,9 +311,20 @@ fn make_utp_ctx(
     socket: Arc<UdpSocket>,
     connected_tx: Option<AsyncSender<()>>,
     received_data_tx: Option<AsyncSender<Vec<u8>>>,
+    error_tx: Option<AsyncSender<io::Error>>,
 ) -> UtpContext<Arc<UdpSocket>> {
     let mut utp = UtpContext::new(socket);
-    utp.set_callback(UtpCallbackType::OnError, Box::new(|_| panic!("uTP error")));
+    utp.set_callback(
+        UtpCallbackType::OnError,
+        Box::new(move |args| {
+            if let Some(ref tx) = error_tx {
+                unwrap!(tx.send(args.error()));
+            } else {
+                panic!("uTP error: {}", args.error());
+            }
+            0
+        }),
+    );
     utp.set_callback(
         UtpCallbackType::Sendto,
         Box::new(|args| {

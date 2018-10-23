@@ -7,6 +7,7 @@ use ctx::{get_user_data, UtpUserData};
 use libc;
 use nix::sys::socket::SockAddr;
 use std::ffi::CStr;
+use std::io;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::{mem, slice};
@@ -122,6 +123,18 @@ impl<T> UtpCallbackArgs<T> {
             CStr::from_ptr((*self.inner).buf as *const libc::c_char)
                 .to_string_lossy()
                 .into_owned()
+        }
+    }
+
+    /// Returns error that was passed to `OnError` callback.
+    /// Should only be used from `OnError` callback.
+    pub fn error(&self) -> io::Error {
+        let err_code = unsafe { (*self.inner).args1.error_code } as u32;
+        match err_code {
+            UTP_ECONNREFUSED => io::ErrorKind::ConnectionRefused.into(),
+            UTP_ECONNRESET => io::ErrorKind::ConnectionReset.into(),
+            UTP_ETIMEDOUT => io::ErrorKind::TimedOut.into(),
+            _ => io::ErrorKind::Other.into(),
         }
     }
 }
