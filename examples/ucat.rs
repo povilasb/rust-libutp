@@ -25,7 +25,7 @@ use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::os::unix::io::RawFd;
 use std::sync::Arc;
-use utp::{UtpCallbackArgs, UtpCallbackType, UtpContext, UtpSocket, UtpState};
+use utp::{UtpCallbackArgs, UtpCallbackType, UtpContext, UtpError, UtpSocket, UtpState};
 
 #[derive(Debug)]
 struct CliArgs {
@@ -202,16 +202,15 @@ impl UtpClient {
     }
 
     fn flush_input_buffer(&mut self, utp_socket: &UtpSocket) {
-        const MAX_SIZE: isize = isize::max_value();
-        const MIN_SIZE: isize = isize::min_value();
-
         loop {
-            let res = utp_socket.send(&self.buf[self.buf_bytes_sent..self.buf_bytes_read]);
-            match res {
-                0 => break,
-                MIN_SIZE...-1 => panic!("uTP socket send failed"),
-                bytes_sent @ 1...MAX_SIZE => self.buf_bytes_sent += bytes_sent as usize,
-                ret @ _ => panic!("Unknown return value: {}", ret),
+            match utp_socket.send(&self.buf[self.buf_bytes_sent..self.buf_bytes_read]) {
+                Ok(bytes_sent) => self.buf_bytes_sent += bytes_sent,
+                Err(UtpError::WouldBlock) => break,
+                Err(UtpError::SendFailed) => panic!("uTP socket send failed"),
+                Err(UtpError::UnexpectedResult(res)) => {
+                    panic!("Unknown send return value: {}", res)
+                }
+                Err(e) => panic!("Unexpected error: {:?}", e),
             }
         }
         if self.buf_bytes_sent == self.buf_bytes_read {
@@ -287,8 +286,7 @@ fn handle_udp<T>(socket: &UdpSocket, buf: &mut [u8], utp: &UtpContext<T>) -> io:
     loop {
         match socket.recv_from(buf) {
             Ok((bytes_read, sender_addr)) => {
-                let res = utp.process_udp(&buf[..bytes_read], sender_addr);
-                assert_eq!(res, 1);
+                unwrap!(utp.process_udp(&buf[..bytes_read], sender_addr));
             }
             Err(e) => {
                 if e.kind() == io::ErrorKind::WouldBlock {

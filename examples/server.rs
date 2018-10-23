@@ -13,8 +13,7 @@ fn handle_connections(utp: UtpContext<UdpSocket>) -> io::Result<()> {
     loop {
         let mut buf = [0; 4096];
         let (bytes_received, sender_addr) = socket.recv_from(&mut buf)?;
-        let res = utp.process_udp(&buf[..bytes_received], sender_addr);
-        assert_eq!(res, 1);
+        unwrap!(utp.process_udp(&buf[..bytes_received], sender_addr));
         utp.ack_packets();
     }
 }
