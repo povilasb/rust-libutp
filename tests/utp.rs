@@ -10,9 +10,11 @@ extern crate rand;
 use mio::net::UdpSocket;
 use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::channel::{channel as async_channel, Sender as AsyncSender};
+use mio_extras::timer::Timer;
 use rand::RngCore;
 use std::sync::Arc;
-use utp::{UtpCallbackType, UtpContext, UtpState};
+use std::time::Duration;
+use utp::{UtpCallbackType, UtpContext, UtpError, UtpState};
 
 mod connect {
     use super::*;
@@ -126,16 +128,20 @@ fn exchange_data(byte_count: usize) {
     const CLIENT_SOCKET_TOKEN: Token = Token(1);
     const CLIENT_WRITABLE_RX_TOKEN: Token = Token(2);
     const DATA_RX_TOKEN: Token = Token(3);
+    const TIMEOUT_TOKEN: Token = Token(4);
     let (writable_tx, writable_rx) = async_channel();
     let (received_data_tx, received_data_rx) = async_channel();
 
     let server_udp_socket = Arc::new(unwrap!(UdpSocket::bind(&addr!("127.0.0.1:0"))));
     let server_addr = unwrap!(server_udp_socket.local_addr());
-    let server_utp = make_utp_ctx(Arc::clone(&server_udp_socket), None, Some(received_data_tx));
+    let mut server_utp = make_utp_ctx(Arc::clone(&server_udp_socket), None, Some(received_data_tx));
 
     let client_udp_socket = Arc::new(unwrap!(UdpSocket::bind(&addr!("0.0.0.0:0"))));
     let mut client_utp = make_utp_ctx(Arc::clone(&client_udp_socket), Some(writable_tx), None);
     let client_utp_socket = unwrap!(client_utp.connect(server_addr));
+
+    let mut timer = Timer::default();
+    timer.set_timeout(Duration::from_millis(500), ());
 
     let evloop = unwrap!(Poll::new());
     unwrap!(evloop.register(
@@ -162,6 +168,7 @@ fn exchange_data(byte_count: usize) {
         Ready::readable(),
         PollOpt::level(),
     ));
+    unwrap!(evloop.register(&timer, TIMEOUT_TOKEN, Ready::readable(), PollOpt::edge(),));
 
     let out_data = random_vec(byte_count);
     let mut bytes_sent = 0;
@@ -176,7 +183,11 @@ fn exchange_data(byte_count: usize) {
                 CLIENT_SOCKET_TOKEN => handle_udp_packet(&client_udp_socket, &client_utp),
                 CLIENT_WRITABLE_RX_TOKEN => {
                     unwrap!(writable_rx.try_recv());
-                    bytes_sent += unwrap!(client_utp_socket.send(&out_data[bytes_sent..]));
+                    match client_utp_socket.send(&out_data[bytes_sent..]) {
+                        Ok(count) => bytes_sent += count,
+                        Err(UtpError::WouldBlock) => {}
+                        e => panic!("UtpSocket::send() failed: {:?}", e),
+                    }
                 }
                 DATA_RX_TOKEN => {
                     let buf = unwrap!(received_data_rx.try_recv());
@@ -185,6 +196,11 @@ fn exchange_data(byte_count: usize) {
                         assert_eq!(&in_data[..], &out_data[..]);
                         break 'main_loop;
                     }
+                }
+                TIMEOUT_TOKEN => {
+                    client_utp.check_timeouts();
+                    server_utp.check_timeouts();
+                    timer.set_timeout(Duration::from_millis(500), ());
                 }
                 _ => panic!("Unexpected event"),
             }
