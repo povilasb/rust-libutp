@@ -1,0 +1,25 @@
+env:
+  global:
+    - RUST_BACKTRACE=1
+    - PATH=$PATH:$HOME/.cargo/bin
+os:
+  - linux
+  - osx
+language: rust
+rust:
+  - 1.29.2
+sudo: true
+cache:
+  cargo: true
+before_script:
+  - ./install_libutp.sh
+  - curl -sSL https://github.com/maidsafe/QA/raw/master/travis/cargo_install.sh > cargo_install.sh
+  - bash cargo_install.sh cargo-prune
+  - rustup component add rustfmt-preview
+  - rustup component add clippy-preview
+script:
+  - cargo fmt -- --check &&
+    cargo test --verbose --release &&
+    cargo clippy --verbose --release
+before_cache:
+  - cargo prune
