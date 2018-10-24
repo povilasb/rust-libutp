@@ -1,0 +1,3 @@
+[submodule "libutp-sys/libutp"]
+	path = libutp-sys/libutp
+	url = https://github.com/bittorrent/libutp
