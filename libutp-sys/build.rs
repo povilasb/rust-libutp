@@ -14,17 +14,17 @@ fn main() {
             .status();
     }
 
+    let target = env::var("TARGET").unwrap();
+    let target_is_windows = target.contains("windows");
+
     let out_dir = PathBuf::from(unwrap!(env::var("OUT_DIR")));
-    compile_libutp(&out_dir);
+    compile_libutp(&out_dir, target_is_windows);
     println!("cargo:rustc-link-lib=static=utp");
     println!("cargo:rustc-link-search=native=build");
-    gen_libutp_rust_bindings(&out_dir);
+    gen_libutp_rust_bindings(&out_dir, target_is_windows);
 }
 
-fn compile_libutp(out_dir: &PathBuf) {
-    let target = env::var("TARGET").unwrap();
-    let windows = target.contains("windows");
-
+fn compile_libutp(out_dir: &PathBuf, target_is_windows: bool) {
     let mut cfg = cc::Build::new();
     cfg.out_dir(out_dir)
         .cpp(true)
@@ -35,8 +35,9 @@ fn compile_libutp(out_dir: &PathBuf) {
         .file("libutp/utp_internal.cpp")
         .file("libutp/utp_packedsockaddr.cpp")
         .file("libutp/utp_utils.cpp");
-    if windows {
-        cfg.file("libutp/libutp_inet_ntop.cpp");
+    if target_is_windows {
+        cfg.define("WIN32", None)
+            .file("libutp/libutp_inet_ntop.cpp");
     } else {
         cfg.define("POSIX", None);
     }
@@ -44,9 +45,14 @@ fn compile_libutp(out_dir: &PathBuf) {
 }
 
 /// Write the bindings to the $OUT_DIR/bindings.rs file.
-fn gen_libutp_rust_bindings(out_dir: &PathBuf) {
+fn gen_libutp_rust_bindings(out_dir: &PathBuf, target_is_windows: bool) {
+    let header = if target_is_windows {
+        "utp_win.h"
+    } else {
+        "utp_posix.h"
+    };
     let bindings = bindgen::Builder::default()
-        .header("utp.h")
+        .header(header)
         .layout_tests(false)
         .blacklist_type("sockaddr.*")
         .ctypes_prefix("libc")

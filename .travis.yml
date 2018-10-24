@@ -5,6 +5,7 @@ env:
 os:
   - linux
   - osx
+  - windows
 language: rust
 rust:
   - 1.29.2
@@ -12,8 +13,7 @@ sudo: true
 cache:
   cargo: true
 before_script:
-  - curl -sSL https://github.com/maidsafe/QA/raw/master/travis/cargo_install.sh > cargo_install.sh
-  - bash cargo_install.sh cargo-prune
+  - cargo install cargo-prune --force
   - rustup component add rustfmt-preview
   - rustup component add clippy-preview
   - git submodule update --init --recursive

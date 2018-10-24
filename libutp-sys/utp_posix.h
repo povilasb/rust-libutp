@@ -28,7 +28,36 @@ extern "C" {
 #endif
 
 #include <stdarg.h>
-#include "utp_types.h"
+
+// Definitions from utp_types.h
+
+// standard types
+typedef unsigned char byte;
+typedef unsigned char uint8;
+typedef signed char int8;
+typedef unsigned short uint16;
+typedef signed short int16;
+typedef unsigned int uint;
+typedef unsigned int uint32;
+typedef signed int int32;
+
+typedef unsigned long long uint64;
+typedef long long int64;
+
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <sys/socket.h>
+
+#ifdef IP_DONTFRAG
+    #define IP_OPT_DONTFRAG IP_DONTFRAG
+#elif defined IP_DONTFRAGMENT
+    #define IP_OPT_DONTFRAG IP_DONTFRAGMENT
+#else
+    //#warning "I don't know how to set DF bit on this system"
+#endif
+
+// ---------------------------
 
 typedef struct UTPSocket					utp_socket;
 typedef struct struct_utp_context			utp_context;
