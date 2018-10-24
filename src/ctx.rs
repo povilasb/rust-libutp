@@ -4,12 +4,12 @@
 
 use super::UtpError;
 use callback::{get_user_data_from_args, UtpCallback, UtpCallbackArgs, UtpCallbackType};
+use libutp_sys::*;
 use nix::sys::socket::{sockaddr, InetAddr, SockAddr};
 use socket::{make_utp_socket, UtpSocket};
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
-use utp_sys::*;
 
 /// To manipulate the user data held inside uTP context use `UtpContextRef` which is acquired with
 /// `UtpContext::get_ref()`.

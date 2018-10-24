@@ -1,4 +1,4 @@
-//! This crate provides libutp Rust bindings.
+//! This crate provides safe libutp Rust bindings.
 
 #![forbid(
     exceeding_bitshifts,
@@ -47,19 +47,19 @@ extern crate libc;
 extern crate nix;
 #[macro_use]
 extern crate quick_error;
+extern crate libutp_sys;
 
 mod callback;
 mod ctx;
 mod error;
 mod socket;
-mod utp_sys;
 
 pub use callback::{UtpCallback, UtpCallbackArgs, UtpCallbackType};
 pub use ctx::UtpContext;
 pub use error::UtpError;
 pub use socket::UtpSocket;
 
-use utp_sys::*;
+use libutp_sys::*;
 
 /// uTP connection state
 #[derive(Debug, PartialEq)]

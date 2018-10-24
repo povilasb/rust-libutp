@@ -3,8 +3,8 @@
 #![allow(unsafe_code)]
 
 use super::UtpError;
+use libutp_sys::*;
 use std::net::Shutdown;
-use utp_sys::*;
 
 const MAX_SIZE: isize = isize::max_value();
 

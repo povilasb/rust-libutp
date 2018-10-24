@@ -5,13 +5,13 @@
 use super::UtpState;
 use ctx::{get_user_data, UtpUserData};
 use libc;
+use libutp_sys::*;
 use nix::sys::socket::SockAddr;
 use std::ffi::CStr;
 use std::io;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::{mem, slice};
-use utp_sys::*;
 
 /// Identifies uTP callback.
 #[derive(Hash, Eq, PartialEq)]
