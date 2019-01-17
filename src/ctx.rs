@@ -3,10 +3,10 @@
 #![allow(unsafe_code)]
 
 use super::UtpError;
-use callback::{get_user_data_from_args, UtpCallback, UtpCallbackArgs, UtpCallbackType};
+use crate::callback::{get_user_data_from_args, UtpCallback, UtpCallbackArgs, UtpCallbackType};
+use crate::socket::{make_utp_socket, UtpSocket};
 use libutp_sys::*;
 use nix::sys::socket::{sockaddr, InetAddr, SockAddr};
-use socket::{make_utp_socket, UtpSocket};
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
@@ -162,7 +162,9 @@ impl<T> Drop for UtpContext<T> {
 fn init_callbacks<T>(ctx: *mut utp_context) {
     macro_rules! set_callback {
         ($cb_type:expr) => {{
-            unsafe extern "C" fn c_utp_callback<T>(raw_args: *mut utp_callback_arguments) -> uint64 {
+            unsafe extern "C" fn c_utp_callback<T>(
+                raw_args: *mut utp_callback_arguments,
+            ) -> uint64 {
                 let args: UtpCallbackArgs<T> = UtpCallbackArgs::wrap(raw_args);
                 let args2 = UtpCallbackArgs::wrap(raw_args);
                 (*get_user_data_from_args(&args).callbacks[&$cb_type])(args2)

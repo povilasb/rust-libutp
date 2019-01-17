@@ -230,9 +230,11 @@ fn make_client_utp_ctx(data: ClientData) -> UtpContext<ClientData> {
             let client_data = args.user_data();
             match client_data.udp_socket.send_to(args.buf(), &addr) {
                 Ok(bytes_sent) => assert_eq!(args.buf().len(), bytes_sent),
-                Err(e) => if e.kind() != io::ErrorKind::WouldBlock {
-                    panic!("UDP error: {}", e);
-                },
+                Err(e) => {
+                    if e.kind() != io::ErrorKind::WouldBlock {
+                        panic!("UDP error: {}", e);
+                    }
+                }
             }
             0
         }),
@@ -376,24 +378,29 @@ fn parse_cli_args() -> Result<CliArgs, clap::Error> {
                 .value_name("LISTEN_PORT")
                 .help("Local port")
                 .takes_value(true),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("buffer_size")
                 .short("B")
                 .value_name("BUFFER_SIZE")
                 .help(
                     "Buffer size for incoming data. Default is 65487 bytes - max uTP data length.",
-                ).takes_value(true),
-        ).arg(
+                )
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("dst_ip")
                 .value_name("DESTINATION_IP")
                 .help("Destination IP. If specified ucat operates in client mode.")
                 .takes_value(true),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("dst_port")
                 .value_name("DESTINATION_PORT")
                 .help("Destination port")
                 .takes_value(true),
-        ).get_matches();
+        )
+        .get_matches();
 
     let listen_mode = matches.is_present("listen_mode");
     let port = matches

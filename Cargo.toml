@@ -2,6 +2,7 @@
 authors = ["MaidSafe Developers <dev@maidsafe.net>"]
 name = "utp"
 version = "0.1.0"
+edition = "2018"
 
 [build-dependencies]
 bindgen = "~0.42.1"

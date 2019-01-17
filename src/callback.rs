@@ -3,11 +3,11 @@
 #![allow(unsafe_code)]
 
 use super::UtpState;
-use ctx::{get_user_data, UtpUserData};
+use crate::ctx::{get_user_data, UtpUserData};
+use crate::socket::{make_utp_socket, UtpSocket};
 use libc;
 use libutp_sys::*;
 use nix::sys::socket::SockAddr;
-use socket::{make_utp_socket, UtpSocket};
 use std::ffi::CStr;
 use std::io;
 use std::marker::PhantomData;

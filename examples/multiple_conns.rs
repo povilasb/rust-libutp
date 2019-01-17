@@ -23,8 +23,6 @@ fn main() -> io::Result<()> {
         let (bytes_received, client_addr) = unwrap!(udp_socket.recv_from(&mut buf));
         unwrap!(utp.process_udp(&buf[..bytes_received], client_addr));
     }
-
-    Ok(())
 }
 
 fn make_utp_ctx(socket: Rc<UdpSocket>) -> UtpContext<Rc<UdpSocket>> {

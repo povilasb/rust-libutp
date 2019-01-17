@@ -41,21 +41,18 @@
     variant_size_differences
 )]
 
-extern crate libc;
-extern crate nix;
 #[macro_use]
 extern crate quick_error;
-extern crate libutp_sys;
 
 mod callback;
 mod ctx;
 mod error;
 mod socket;
 
-pub use callback::{UtpCallback, UtpCallbackArgs, UtpCallbackType};
-pub use ctx::UtpContext;
-pub use error::UtpError;
-pub use socket::UtpSocket;
+pub use crate::callback::{UtpCallback, UtpCallbackArgs, UtpCallbackType};
+pub use crate::ctx::UtpContext;
+pub use crate::error::UtpError;
+pub use crate::socket::UtpSocket;
 
 use libutp_sys::*;
 

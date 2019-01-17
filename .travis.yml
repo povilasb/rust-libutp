@@ -7,19 +7,18 @@ os:
   - osx
   - windows
 language: rust
-rust:
-  - 1.29.2
 sudo: true
 cache:
   cargo: true
 before_script:
-  - cargo install cargo-prune --force
-  - rustup component add rustfmt-preview
-  - rustup component add clippy-preview
+  - if ! cargo prune --version | grep -q "0.1.8"; then
+      cargo install cargo-prune --vers="0.1.8" --force;
+    fi
+  - rustup component add rustfmt clippy
   - git submodule update --init --recursive
 script:
   - cargo fmt -- --check &&
     cargo test --verbose --release &&
-    cargo clippy --verbose --release
+    cargo clippy --verbose --release --all-targets
 before_cache:
   - cargo prune
