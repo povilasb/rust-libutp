@@ -7,6 +7,7 @@ use ctx::{get_user_data, UtpUserData};
 use libc;
 use libutp_sys::*;
 use nix::sys::socket::SockAddr;
+use socket::{make_utp_socket, UtpSocket};
 use std::ffi::CStr;
 use std::io;
 use std::marker::PhantomData;
@@ -114,6 +115,13 @@ impl<T> UtpCallbackArgs<T> {
     /// be acknowledged.
     pub fn ack_data(&mut self) {
         unsafe { utp_read_drained((*self.inner).socket) }
+    }
+
+    /// Returns owned uTP socket object.
+    /// Socket will be closed, when this object is dropped.
+    // TODO(povilas): figure out the way to return non-owned (reference to) uTP socket.
+    pub fn socket(&self) -> UtpSocket {
+        unsafe { make_utp_socket((*self.inner).socket) }
     }
 
     /// In some cases (e.g. logging), `buf` argument holds a C style, 0 terminated, string.
