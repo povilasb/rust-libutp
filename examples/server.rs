@@ -1,12 +1,21 @@
 //! This uTP server example simply receives data from anybody and prints it to the stdout.
+//!
+//! The default listen port is 1234. In addition, you can specify port number as a first argument:
+//!
+//! ```
+//! $ cargo run --example server -- 5000
+//! ```
 
 extern crate utp;
 #[macro_use]
 extern crate unwrap;
 
+use std::env;
 use std::io;
-use std::net::UdpSocket;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use utp::{UtpCallbackArgs, UtpCallbackType, UtpContext};
+
+const DEFAULT_PORT: u16 = 1234;
 
 fn handle_connections(utp: UtpContext<UdpSocket>) -> io::Result<()> {
     let socket = utp.user_data();
@@ -19,10 +28,19 @@ fn handle_connections(utp: UtpContext<UdpSocket>) -> io::Result<()> {
 }
 
 fn main() -> io::Result<()> {
-    let socket = UdpSocket::bind("0.0.0.0:1234")?;
+    let port = get_port();
+    let socket = UdpSocket::bind(ipv4_addr(port))?;
     let utp = make_utp_ctx(socket);
+    println!("Listening for connections on port: {}", port);
     handle_connections(utp)?;
     Ok(())
+}
+
+fn get_port() -> u16 {
+    match env::args().nth(1) {
+        Some(arg1) => arg1.parse::<u16>().unwrap_or(DEFAULT_PORT),
+        None => DEFAULT_PORT,
+    }
 }
 
 fn make_utp_ctx(socket: UdpSocket) -> UtpContext<UdpSocket> {
@@ -69,7 +87,7 @@ fn make_utp_ctx(socket: UdpSocket) -> UtpContext<UdpSocket> {
     utp.set_callback(
         UtpCallbackType::Sendto,
         Box::new(|args| {
-            println!("sendto: {:?}", args.address());
+            println!("sendto: {:?} {} bytes", args.address(), args.buf().len());
             if let Some(addr) = args.address() {
                 let sock = args.user_data();
                 sock.send_to(args.buf(), addr).unwrap();
@@ -78,4 +96,9 @@ fn make_utp_ctx(socket: UdpSocket) -> UtpContext<UdpSocket> {
         }),
     );
     utp
+}
+
+/// A convevience method to build IPv4 address with a port number.
+pub fn ipv4_addr(port: u16) -> SocketAddr {
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), port))
 }
